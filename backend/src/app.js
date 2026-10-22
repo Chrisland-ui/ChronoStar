@@ -38,7 +38,8 @@ export function createApp(clients, log = logger, store = createEventStore()) {
 
   app.use((err, _req, res, _next) => {
     log.error({ err: err.message });
-    res.status(500).json({ error: 'internal server error' });
+    const status = Number.isInteger(err.statusCode) ? err.statusCode : 500;
+    res.status(status).json({ error: status === 502 ? 'upstream simulation failed' : 'internal server error' });
   });
 
   return app;
