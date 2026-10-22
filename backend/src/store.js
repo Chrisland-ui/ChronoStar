@@ -51,7 +51,11 @@ export class FileEventStore extends BaseEventStore {
     const known = new Set(current.map((event) => event.key));
     const additions = incoming
       .map((event) => ({ ...event, key: event.key || `${event.type}:${event.id}:${event.targetLedger}` }))
-      .filter((event) => !known.has(event.key));
+      .filter((event) => {
+        if (known.has(event.key)) return false;
+        known.add(event.key);
+        return true;
+      });
     if (!additions.length) return current;
     this.events = [...current, ...additions].slice(-this.maxEvents);
     this.writeQueue = this.writeQueue.then(async () => {
@@ -92,7 +96,11 @@ export class InMemoryEventStore extends BaseEventStore {
     const known = new Set(this.events.map((e) => e.key));
     const additions = incoming
       .map((event) => ({ ...event, key: event.key || `${event.type}:${event.id}:${event.targetLedger}` }))
-      .filter((event) => !known.has(event.key));
+      .filter((event) => {
+        if (known.has(event.key)) return false;
+        known.add(event.key);
+        return true;
+      });
     if (!additions.length) return this.events;
     this.events = [...this.events, ...additions].slice(-this.maxEvents);
     return this.events;
