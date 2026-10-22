@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { api } from '@/lib/api';
+import { api, getApiErrorMessage } from '@/lib/api';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
 import { DetailPageSkeleton } from '@/components/Skeleton';
@@ -15,24 +15,30 @@ export default function VaultDetailPage() {
   const [vault, setVault] = useState<VaultEntry | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const activeRequest = useRef<AbortController | null>(null);
   const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
 
   const fetchVault = useCallback(() => {
-    if (!address) return;
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    if (!address) { setLoading(false); setVault(null); return; }
     setLoading(true);
     setError(null);
-    api.getSchedules(address)
+    api.getSchedules(address, { signal: controller.signal })
       .then(vaults => {
+        if (controller.signal.aborted) return;
         const found = vaults.find(v => v.id === Number(id));
         if (found) setVault(found);
-        else setError('Vault not found. It may have been removed.');
+        else { setVault(null); setError('Vault not found. It may have been removed.'); }
       })
-      .catch(() => setError('Failed to load vault details. Please check your connection and try again.'))
-      .finally(() => setLoading(false));
+      .catch((err) => { if (!controller.signal.aborted) setError(getApiErrorMessage(err)); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
   }, [address, id]);
 
   useEffect(() => {
     fetchVault();
+    return () => activeRequest.current?.abort();
   }, [fetchVault]);
 
   if (loading) {

@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { api } from '@/lib/api';
+import { api, getApiErrorMessage } from '@/lib/api';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
 import { DetailPageSkeleton } from '@/components/Skeleton';
@@ -22,43 +22,61 @@ export default function DCADetailPage() {
   const [historyPage, setHistoryPage] = useState(1);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
+  const activeRequest = useRef<AbortController | null>(null);
+
   const fetchDCA = useCallback(() => {
-    if (!address) return;
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    if (!address) {
+      setLoading(false);
+      setDca(null);
+      return;
+    }
     setLoading(true);
     setError(null);
-    api.getDCA(address)
+    api.getDCA(address, { signal: controller.signal })
       .then(dcas => {
-        const found = dcas.find(d => d.id === Number(id));
+        if (controller.signal.aborted) return;
+        const found = dcas.find(item => item.id === Number(id));
         if (found) setDca(found);
-        else setError('DCA policy not found. It may have been removed.');
+        else {
+          setDca(null);
+          setError('DCA policy not found. It may have been removed.');
+        }
       })
-      .catch(() => setError('Failed to load DCA details. Please check your connection and try again.'))
-      .finally(() => setLoading(false));
+      .catch(err => {
+        if (!controller.signal.aborted) setError(getApiErrorMessage(err));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
   }, [address, id]);
 
   useEffect(() => {
     fetchDCA();
+    return () => activeRequest.current?.abort();
   }, [fetchDCA]);
 
   useEffect(() => {
     if (!address || !id) return;
-    let cancelled = false;
+    const controller = new AbortController();
     setHistoryError(null);
 
     api
-      .getDCAHistory(address, Number(id), (historyPage - 1) * HISTORY_PAGE_SIZE + 1, HISTORY_PAGE_SIZE)
+      .getDCAHistory(address, Number(id), (historyPage - 1) * HISTORY_PAGE_SIZE + 1, HISTORY_PAGE_SIZE, { signal: controller.signal })
       .then(res => {
-        if (!cancelled) setHistory(res.executions || []);
+        if (!controller.signal.aborted) setHistory(res.executions || []);
       })
-      .catch(() => {
-        if (!cancelled) {
+      .catch(err => {
+        if (!controller.signal.aborted) {
           setHistory([]);
-          setHistoryError('Failed to load execution history.');
+          setHistoryError(getApiErrorMessage(err));
         }
       });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [address, id, historyPage]);
 
