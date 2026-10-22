@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contractmeta, contracttype, symbol_short, token, Address, Env, IntoVal,
-    String, Symbol, Val, Vec,
+    contract, contracterror, contractimpl, contractmeta, contracttype, symbol_short, token,
+    Address, Env, IntoVal, String, Symbol, Val, Vec,
 };
 
 contractmeta!(key = "name", val = "ChronoStar DCA Policy");
@@ -10,6 +10,20 @@ contractmeta!(
     key = "description",
     val = "Automated dollar-cost averaging policies"
 );
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Error {
+    AmountsMustBePositive = 1,
+    TotalBudgetMustBeExactMultipleOfAmountPerSwap = 2,
+    MinimumIntervalIs120Ledgers = 3,
+    DcaNotActive = 4,
+    TooEarlyToExecute = 5,
+    InsufficientBudget = 6,
+    SwapResultedInZeroOutput = 7,
+    SlippageShortfall = 8,
+    CannotTopUpCancelledPolicy = 9,
+}
 
 /// Upper bound on how many records a single `get_execution_history` call returns.
 /// Callers paginate with `start` to walk the full history.
@@ -90,7 +104,7 @@ impl DCAPolicy {
         amount_per_swap: i128,
         interval_ledgers: u32,
         label: String,
-    ) -> u64 {
+    ) -> Result<u64, Error> {
         Self::create_dca_swap(
             env,
             owner,
@@ -119,17 +133,17 @@ impl DCAPolicy {
         min_output_per_swap: i128,
         interval_ledgers: u32,
         label: String,
-    ) -> u64 {
+    ) -> Result<u64, Error> {
         owner.require_auth();
-        assert!(
-            total_budget > 0 && amount_per_swap > 0,
-            "amounts must be positive"
-        );
-        assert!(
-            total_budget % amount_per_swap == 0,
-            "total_budget must be exact multiple of amount_per_swap"
-        );
-        assert!(interval_ledgers >= 120, "minimum interval is 120 ledgers");
+        if total_budget <= 0 || amount_per_swap <= 0 {
+            return Err(Error::AmountsMustBePositive);
+        }
+        if total_budget % amount_per_swap != 0 {
+            return Err(Error::TotalBudgetMustBeExactMultipleOfAmountPerSwap);
+        }
+        if interval_ledgers < 120 {
+            return Err(Error::MinimumIntervalIs120Ledgers);
+        }
 
         let token_client = token::Client::new(&env, &token_in);
         token_client.transfer_from(
@@ -197,25 +211,25 @@ impl DCAPolicy {
             },
         );
 
-        id
+        Ok(id)
     }
 
-    pub fn execute_swap(env: Env, dca_id: u64) {
+    pub fn execute_swap(env: Env, dca_id: u64) -> Result<(), Error> {
         let mut dca: DCAEntry = env
             .storage()
             .persistent()
             .get(&DataKey::DCA(dca_id))
             .expect("DCA not found");
 
-        assert!(dca.status == DCAStatus::Active, "DCA not active");
-        assert!(
-            env.ledger().sequence() >= dca.next_execution_ledger,
-            "too early to execute"
-        );
-        assert!(
-            dca.remaining_budget >= dca.amount_per_swap,
-            "insufficient budget"
-        );
+        if dca.status != DCAStatus::Active {
+            return Err(Error::DcaNotActive);
+        }
+        if env.ledger().sequence() < dca.next_execution_ledger {
+            return Err(Error::TooEarlyToExecute);
+        }
+        if dca.remaining_budget < dca.amount_per_swap {
+            return Err(Error::InsufficientBudget);
+        }
 
         let swapped = dca.router.is_some() && dca.token_out.is_some();
 
@@ -240,14 +254,12 @@ impl DCAPolicy {
 
             let output_amount: i128 =
                 env.invoke_contract(&router, &Symbol::new(&env, "swap"), swap_args);
-            assert!(
-                output_amount > 0,
-                "swap resulted in zero output"
-            );
-            assert!(
-                output_amount >= dca.min_output_per_swap,
-                "slippage shortfall"
-            );
+            if output_amount <= 0 {
+                return Err(Error::SwapResultedInZeroOutput);
+            }
+            if output_amount < dca.min_output_per_swap {
+                return Err(Error::SlippageShortfall);
+            }
             dca.last_swap_output = output_amount;
         } else {
             let token_client = token::Client::new(&env, &dca.token_in);
@@ -292,9 +304,11 @@ impl DCAPolicy {
             .extend_ttl(&DataKey::DCA(dca_id), 6_312_000, 6_312_000);
         env.events()
             .publish((symbol_short!("swap"), dca_id), dca.executions_completed);
+
+        Ok(())
     }
 
-    pub fn cancel(env: Env, dca_id: u64) {
+    pub fn cancel(env: Env, dca_id: u64) -> Result<(), Error> {
         let mut dca: DCAEntry = env
             .storage()
             .persistent()
@@ -302,7 +316,9 @@ impl DCAPolicy {
             .expect("DCA not found");
 
         dca.owner.require_auth();
-        assert!(dca.status == DCAStatus::Active, "DCA not active");
+        if dca.status != DCAStatus::Active {
+            return Err(Error::DcaNotActive);
+        }
 
         if dca.remaining_budget > 0 {
             let token_client = token::Client::new(&env, &dca.token_in);
@@ -318,9 +334,11 @@ impl DCAPolicy {
         env.storage().persistent().set(&DataKey::DCA(dca_id), &dca);
         env.events()
             .publish((symbol_short!("cancelled"), dca_id), dca.owner.clone());
+
+        Ok(())
     }
 
-    pub fn top_up(env: Env, dca_id: u64, amount: i128) {
+    pub fn top_up(env: Env, dca_id: u64, amount: i128) -> Result<(), Error> {
         let mut dca: DCAEntry = env
             .storage()
             .persistent()
@@ -328,8 +346,12 @@ impl DCAPolicy {
             .expect("DCA not found");
 
         dca.owner.require_auth();
-        assert!(amount > 0, "amount must be positive");
-        assert!(dca.status != DCAStatus::Cancelled, "cannot top-up cancelled policy");
+        if amount <= 0 {
+            return Err(Error::AmountsMustBePositive);
+        }
+        if dca.status == DCAStatus::Cancelled {
+            return Err(Error::CannotTopUpCancelledPolicy);
+        }
 
         let token_client = token::Client::new(&env, &dca.token_in);
         token_client.transfer_from(
@@ -353,6 +375,8 @@ impl DCAPolicy {
             .extend_ttl(&DataKey::DCA(dca_id), 6_312_000, 6_312_000);
         env.events()
             .publish((symbol_short!("topup"), dca_id), amount);
+
+        Ok(())
     }
 
     pub fn get_dca(env: Env, dca_id: u64) -> Option<DCAEntry> {
