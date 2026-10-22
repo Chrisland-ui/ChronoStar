@@ -3,6 +3,7 @@ import cors from 'cors';
 import pinoHttp from 'pino-http';
 import { logger } from './logger.js';
 import { genReqId, globalLimiter } from './middleware.js';
+import { ErrorCode, createErrorHandler, notFoundHandler } from './errors.js';
 import { createSchedulesRouter } from './routes/schedules.js';
 import { createStreamsRouter, createDCARouter } from './routes/streams.js';
 import { createEventsRouter } from './routes/events.js';
@@ -12,7 +13,13 @@ import { createLiveStreamRouter } from './routes/live-stream.js';
 import { EventStore } from './store.js';
 import { createEventStore } from './store.js';
 
-export function createApp(clients, log = logger, store = createEventStore()) {
+/**
+ * @param {object} [options]
+ * @param {string[]} [options.configProblems] Configuration problems found at startup; when
+ *   non-empty, `/healthz` reports 503 instead of a healthy status.
+ */
+export function createApp(clients, log = logger, store = createEventStore(), options = {}) {
+  const configProblems = options.configProblems ?? [];
   const app = express();
 
   app.use(cors());
@@ -31,12 +38,20 @@ export function createApp(clients, log = logger, store = createEventStore()) {
   app.use('/api/events', createEventsRouter(clients, log, store));
   app.use('/api/stats', createStatsRouter(clients));
 
-  app.get('/healthz', (_req, res) => res.json({ status: 'ok' }));
-
-  app.use((err, _req, res, _next) => {
-    log.error({ err: err.message });
-    res.status(500).json({ error: 'internal server error' });
+  app.get('/healthz', (_req, res) => {
+    if (configProblems.length > 0) {
+      return res.status(503).json({
+        status: 'error',
+        code: ErrorCode.INVALID_CONFIG,
+        problems: configProblems,
+      });
+    }
+    return res.json({ status: 'ok' });
   });
+
+  app.use(notFoundHandler);
+
+  app.use(createErrorHandler(log));
 
   return app;
 }

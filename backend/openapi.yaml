@@ -34,6 +34,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: The backend started with an invalid configuration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigErrorResponse"
 
   /api/stats:
     get:
@@ -190,6 +196,135 @@ paths:
           $ref: "#/components/responses/RateLimitedAddress"
         "500":
           $ref: "#/components/responses/InternalError"
+
+  /api/dca/{address}/{id}/history:
+    get:
+      operationId: getDCAHistory
+      summary: Execution history for a DCA policy
+      description: >
+        Returns a page of execution records for a DCA policy owned by the
+        given address. The policy must belong to the address.
+      tags:
+        - DCA
+      parameters:
+        - $ref: "#/components/parameters/StellarAddress"
+        - name: id
+          in: path
+          required: true
+          description: DCA policy id. Must be a positive integer.
+          schema:
+            type: integer
+            minimum: 1
+          example: 1
+        - name: start
+          in: query
+          required: false
+          description: First execution record to return (1-based). Unparseable values fall back to 1.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: Maximum records to return. Clamped to 50; unparseable values fall back to 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 50
+      responses:
+        "200":
+          description: Execution history for the policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DCAHistory"
+        "400":
+          description: Invalid address format or DCA id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                badId:
+                  value:
+                    error: "Invalid DCA id. Must be a positive integer."
+                    code: INVALID_DCA_ID
+        "404":
+          description: The address owns no DCA policy with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "DCA policy not found."
+                code: DCA_NOT_FOUND
+        "429":
+          $ref: "#/components/responses/RateLimitedAddress"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/stream:
+    get:
+      operationId: streamUpdates
+      summary: Live updates (Server-Sent Events)
+      description: >
+        Opens a long-lived `text/event-stream` connection. The server sends a
+        `schedule-update` event immediately and then every few seconds, plus a
+        `: heartbeat` comment every 15 seconds to keep the connection open.
+        Contract read failures are skipped, so an event may omit `vaultCount`.
+      tags:
+        - Live
+      responses:
+        "200":
+          description: Event stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: >
+                  A sequence of SSE frames. Each `schedule-update` frame carries
+                  a JSON object (see ScheduleUpdateEvent) in its `data` field.
+              example: |
+                : connected
+
+                event: schedule-update
+                data: {"timestamp":"2026-10-22T09:00:00.000Z","status":"ok","vaultCount":3}
+
+  /api/openapi.json:
+    get:
+      operationId: getOpenApiSpec
+      summary: This OpenAPI document
+      description: >
+        Returns the API specification as JSON. The first entry in `servers` is
+        the host the request was made to.
+      tags:
+        - Docs
+      responses:
+        "200":
+          description: The OpenAPI document.
+          content:
+            application/json:
+              schema:
+                type: object
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/docs:
+    get:
+      operationId: getApiDocs
+      summary: Interactive API documentation
+      description: Serves a Swagger UI page that renders `/api/openapi.json`.
+      tags:
+        - Docs
+      responses:
+        "200":
+          description: Swagger UI page.
+          content:
+            text/html:
+              schema:
+                type: string
 
 components:
   parameters:
@@ -535,11 +670,81 @@ components:
       type: object
       required:
         - error
+        - code
       properties:
         error:
           type: string
           description: Human-readable error message.
           example: "Invalid Stellar address. Must be a G-starting 56-character public key."
+        code:
+          type: string
+          description: Stable machine-readable error code.
+          enum:
+            - BAD_REQUEST
+            - INVALID_ADDRESS
+            - INVALID_DCA_ID
+            - INVALID_LIMIT
+            - NOT_FOUND
+            - DCA_NOT_FOUND
+            - RATE_LIMITED
+            - INTERNAL_ERROR
+          example: INVALID_ADDRESS
+
+    ConfigErrorResponse:
+      type: object
+      required:
+        - status
+        - code
+        - problems
+      properties:
+        status:
+          type: string
+          example: error
+        code:
+          type: string
+          example: INVALID_CONFIG
+        problems:
+          type: array
+          description: Configuration problems; setting names only, never values.
+          items:
+            type: string
+
+    ScheduleUpdateEvent:
+      type: object
+      description: JSON payload of a `schedule-update` server-sent event.
+      required:
+        - timestamp
+        - status
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: string
+          example: ok
+        vaultCount:
+          type: integer
+          description: Number of vaults; omitted when the contract read failed.
+
+    DCAHistory:
+      type: object
+      required:
+        - dcaId
+        - start
+        - limit
+        - executions
+      properties:
+        dcaId:
+          type: integer
+        start:
+          type: integer
+        limit:
+          type: integer
+        executions:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
 
   responses:
     BadAddress:
@@ -550,6 +755,7 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
           example:
             error: "Invalid Stellar address. Must be a G-starting 56-character public key."
+            code: INVALID_ADDRESS
 
     RateLimited:
       description: Global rate limit exceeded.
@@ -559,6 +765,7 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
           example:
             error: "Too many requests, please try again later."
+            code: RATE_LIMITED
 
     RateLimitedAddress:
       description: Per-address rate limit exceeded.
@@ -568,6 +775,7 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
           example:
             error: "Too many requests for this address, please try again later."
+            code: RATE_LIMITED
 
     InternalError:
       description: Internal server error.
@@ -577,3 +785,4 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
           example:
             error: "internal server error"
+            code: INTERNAL_ERROR

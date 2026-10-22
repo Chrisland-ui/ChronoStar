@@ -1,9 +1,12 @@
 import { Router } from 'express';
 import fs from 'node:fs';
-import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 
-export function createDocsRouter(openapiPath = path.join(process.cwd(), 'openapi.yaml')) {
+/** The spec lives next to `src/`; resolve it from this module, not the working directory. */
+export const DEFAULT_OPENAPI_PATH = fileURLToPath(new URL('../../openapi.yaml', import.meta.url));
+
+export function createDocsRouter(openapiPath = DEFAULT_OPENAPI_PATH) {
   const router = Router();
 
   router.get('/openapi.json', (req, res, next) => {

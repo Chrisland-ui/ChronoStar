@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { validateStellarAddress, addressRouteLimiter } from '../middleware.js';
+import { ErrorCode, sendError } from '../errors.js';
 
 export function createStreamsRouter(client, contractId) {
   const router = Router();
@@ -60,12 +61,12 @@ export function createDCARouter(client, contractId) {
       const address = req.params.address;
       const id = Number(req.params.id);
       if (!Number.isInteger(id) || id < 1) {
-        return res.status(400).json({ error: 'Invalid DCA id. Must be a positive integer.' });
+        return sendError(res, 400, ErrorCode.INVALID_DCA_ID, 'Invalid DCA id. Must be a positive integer.');
       }
 
       const dcaIds = await client.readContract(contractId, 'get_dcas_by_owner', [client.scvAddress(address)]);
       if (!dcaIds || !dcaIds.some(ownerId => Number(ownerId) === id)) {
-        return res.status(404).json({ error: 'DCA policy not found.' });
+        return sendError(res, 404, ErrorCode.DCA_NOT_FOUND, 'DCA policy not found.');
       }
 
       const start = parsePositiveInt(req.query.start, 1);

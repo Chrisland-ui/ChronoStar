@@ -1,3 +1,5 @@
+import { StrKey } from '@stellar/stellar-sdk';
+
 export const config = {
   vaultContractId: process.env.VAULT_CONTRACT_ID || '',
   streamContractId: process.env.STREAM_CONTRACT_ID || '',
@@ -6,3 +8,56 @@ export const config = {
   networkPassphrase: process.env.STELLAR_NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015',
   port: parseInt(process.env.PORT || '3001', 10),
 };
+
+const CONTRACT_ID_VARS = [
+  ['vaultContractId', 'VAULT_CONTRACT_ID'],
+  ['streamContractId', 'STREAM_CONTRACT_ID'],
+  ['dcaContractId', 'DCA_CONTRACT_ID'],
+];
+
+/**
+ * Returns every problem with a configuration, as human-readable strings
+ * (empty when valid). Messages name the setting and never echo its value.
+ */
+export function getConfigProblems(cfg = config) {
+  const problems = [];
+
+  const anyContract = CONTRACT_ID_VARS.some(([key]) => cfg[key]);
+  if (!anyContract) {
+    problems.push('At least one of VAULT_CONTRACT_ID, STREAM_CONTRACT_ID, DCA_CONTRACT_ID must be set');
+  }
+  for (const [key, envName] of CONTRACT_ID_VARS) {
+    if (cfg[key] && !StrKey.isValidContract(cfg[key])) {
+      problems.push(`${envName} is not a valid Stellar contract address`);
+    }
+  }
+
+  try {
+    const url = new URL(cfg.rpcUrl);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      problems.push('STELLAR_RPC_URL must use http or https');
+    }
+  } catch {
+    problems.push('STELLAR_RPC_URL is not a valid URL');
+  }
+
+  if (!Number.isInteger(cfg.port) || cfg.port < 1 || cfg.port > 65535) {
+    problems.push('PORT must be a whole number between 1 and 65535');
+  }
+
+  if (!cfg.networkPassphrase) {
+    problems.push('STELLAR_NETWORK_PASSPHRASE must not be empty');
+  }
+
+  return problems;
+}
+
+/** Throws one error listing every configuration problem, or returns when valid. */
+export function validateConfig(cfg = config) {
+  const problems = getConfigProblems(cfg);
+  if (problems.length > 0) {
+    throw new Error(
+      `Invalid backend configuration:\n${problems.map((p) => `  - ${p}`).join('\n')}`,
+    );
+  }
+}

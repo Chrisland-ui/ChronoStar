@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import rateLimit from 'express-rate-limit';
+import { ErrorCode, sendError } from './errors.js';
 
 const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
 
@@ -15,7 +16,7 @@ export function genReqId(req, res) {
 export function validateStellarAddress(req, res, next) {
   const { address } = req.params;
   if (!STELLAR_PUBLIC_KEY_RE.test(address)) {
-    return res.status(400).json({ error: 'Invalid Stellar address. Must be a G-starting 56-character public key.' });
+    return sendError(res, 400, ErrorCode.INVALID_ADDRESS, 'Invalid Stellar address. Must be a G-starting 56-character public key.');
   }
   next();
 }
@@ -25,7 +26,7 @@ export const globalLimiter = rateLimit({
   max: 500,
   standardHeaders: false,
   legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later.' },
+  message: { error: 'Too many requests, please try again later.', code: ErrorCode.RATE_LIMITED },
 });
 
 export const addressRouteLimiter = rateLimit({
@@ -33,7 +34,7 @@ export const addressRouteLimiter = rateLimit({
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many requests for this address, please try again later.' },
+  message: { error: 'Too many requests for this address, please try again later.', code: ErrorCode.RATE_LIMITED },
 });
 
 export const eventsLimiter = rateLimit({
@@ -41,5 +42,5 @@ export const eventsLimiter = rateLimit({
   max: 50,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later.' },
+  message: { error: 'Too many requests, please try again later.', code: ErrorCode.RATE_LIMITED },
 });
