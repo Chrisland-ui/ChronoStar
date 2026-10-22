@@ -55,7 +55,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
       try {
         const details = await getNetworkDetails();
-        if (details && !details.error) {
+        if (details && !(details as { error?: unknown }).error) {
           setNetwork(details.network || null);
           setNetworkPassphrase(details.networkPassphrase || null);
           checkNetwork(details.networkPassphrase || null);
@@ -149,7 +149,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setAddress(pubKey || null);
       try {
         const details = await getNetworkDetails();
-        if (details && !details.error) {
+        if (details && !(details as { error?: unknown }).error) {
           setNetwork(details.network || null);
           setNetworkPassphrase(details.networkPassphrase || null);
           checkNetwork(details.networkPassphrase || null);

@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { api } from '@/lib/api';
+import { api, getApiErrorMessage } from '@/lib/api';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
 import { DetailPageSkeleton } from '@/components/Skeleton';
@@ -17,22 +17,40 @@ export default function StreamDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
 
+  const activeRequest = useRef<AbortController | null>(null);
+
   const fetchStream = useCallback(() => {
-    if (!address) return;
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    if (!address) {
+      setLoading(false);
+      setStream(null);
+      return;
+    }
     setLoading(true);
     setError(null);
-    api.getStreams(address)
+    api.getStreams(address, { signal: controller.signal })
       .then(streams => {
-        const found = streams.find(s => s.id === Number(id));
+        if (controller.signal.aborted) return;
+        const found = streams.find(item => item.id === Number(id));
         if (found) setStream(found);
-        else setError('Stream not found. It may have been removed.');
+        else {
+          setStream(null);
+          setError('Stream not found. It may have been removed.');
+        }
       })
-      .catch(() => setError('Failed to load stream details. Please check your connection and try again.'))
-      .finally(() => setLoading(false));
+      .catch(err => {
+        if (!controller.signal.aborted) setError(getApiErrorMessage(err));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
   }, [address, id]);
 
   useEffect(() => {
     fetchStream();
+    return () => activeRequest.current?.abort();
   }, [fetchStream]);
 
   if (loading) {
@@ -110,7 +128,7 @@ export default function StreamDetailPage() {
   );
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function DetailRow({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="flex justify-between">
       <span className="text-sm text-text-muted">{label}</span>

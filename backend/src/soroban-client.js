@@ -5,11 +5,20 @@ import {
   Address,
   Keypair,
   Account,
+  MuxedAccount,
   TransactionBuilder,
   scValToNative,
 } from "@stellar/stellar-sdk";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
+
+export class ContractSimulationError extends Error {
+  constructor(diagnostic) {
+    super(`Soroban simulation failed: ${diagnostic}`);
+    this.name = "ContractSimulationError";
+    this.statusCode = 502;
+  }
+}
 
 export class SorobanClient {
   constructor() {
@@ -36,6 +45,13 @@ export class SorobanClient {
 
   async readContract(contractId, method, args) {
     const sim = await this.simulate(contractId, method, args);
+    if (rpc.Api.isSimulationError(sim) || sim?.error) {
+      const diagnostic =
+        typeof sim?.error === "string"
+          ? sim.error
+          : sim?.error?.message || sim?.error?.toString?.() || "unknown RPC error";
+      throw new ContractSimulationError(diagnostic);
+    }
     if (!sim?.result?.retval) return null;
     return normalizeNative(scValToNative(sim.result.retval));
   }
@@ -47,7 +63,12 @@ export class SorobanClient {
     return xdr.ScVal.scvU32(Number(val));
   }
   scvAddress(addr) {
-    return Address.fromString(addr).toScVal();
+    // Contracts only know account and contract addresses, so a muxed account
+    // (M...) is looked up by the account it belongs to.
+    const resolved = addr.startsWith("M")
+      ? MuxedAccount.fromAddress(addr, "0").baseAccount().accountId()
+      : addr;
+    return Address.fromString(resolved).toScVal();
   }
 }
 

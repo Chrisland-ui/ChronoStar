@@ -12,6 +12,7 @@ import { createDocsRouter } from './routes/docs.js';
 import { createLiveStreamRouter } from './routes/live-stream.js';
 import { EventStore } from './store.js';
 import { createEventStore } from './store.js';
+import { config } from './config.js';
 
 /**
  * @param {object} [options]
@@ -22,6 +23,8 @@ export function createApp(clients, log = logger, store = createEventStore(), opt
   const configProblems = options.configProblems ?? [];
   const app = express();
 
+  app.set('trust proxy', config.trustProxy);
+
   app.use(cors());
   app.use(pinoHttp({
     logger: log,
@@ -30,7 +33,7 @@ export function createApp(clients, log = logger, store = createEventStore(), opt
   app.use(express.json());
   app.use(globalLimiter);
 
-  app.use('/api', createDocsRouter());
+  app.use('/api', createDocsRouter(undefined, config.publicBaseUrl));
   app.use('/api/stream', createLiveStreamRouter(clients, log));
   app.use('/api/schedules', createSchedulesRouter(clients.vault.client, clients.vault.contractId));
   app.use('/api/streams', createStreamsRouter(clients.stream.client, clients.stream.contractId));
@@ -47,6 +50,12 @@ export function createApp(clients, log = logger, store = createEventStore(), opt
       });
     }
     return res.json({ status: 'ok' });
+  app.get('/healthz', (_req, res) => res.json({ status: 'ok' }));
+
+  app.use((err, _req, res, _next) => {
+    log.error({ err: err.message });
+    const status = Number.isInteger(err.statusCode) ? err.statusCode : 500;
+    res.status(status).json({ error: status === 502 ? 'upstream simulation failed' : 'internal server error' });
   });
 
   app.use(notFoundHandler);

@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useWallet } from '@/lib/store';
-import { api } from '@/lib/api';
+import { api, getApiErrorMessage } from '@/lib/api';
 import { DashboardSkeleton } from '@/components/Skeleton';
 import type { VaultEntry, StreamEntry, DCAEntry } from '@/types';
 
@@ -34,30 +34,37 @@ export default function DashboardPage() {
   const [streams, setStreams] = useState<StreamEntry[]>([]);
   const [dcas, setDcas] = useState<DCAEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const activeRequest = useRef<AbortController | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(() => {
-    if (!address) return;
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    if (!address) { setLoading(false); return; }
     setError(null);
     setLoading(true);
+    const options = { signal: controller.signal };
     Promise.all([
-      api.getSchedules(address).catch(() => []),
-      api.getStreams(address).catch(() => []),
-      api.getDCA(address).catch(() => []),
+      api.getSchedules(address, options),
+      api.getStreams(address, options),
+      api.getDCA(address, options),
     ])
       .then(([v, s, d]) => {
-        setVaults(v);
-        setStreams(s);
-        setDcas(d);
+        if (controller.signal.aborted) return;
+        setVaults(v); setStreams(s); setDcas(d);
       })
-      .catch(() => {
-        setError('Failed to load dashboard data. Please check your connection and try again.');
+      .catch((err) => {
+        if (!controller.signal.aborted) setError(getApiErrorMessage(err));
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
   }, [address]);
 
   useEffect(() => {
     fetchData();
+    return () => activeRequest.current?.abort();
   }, [fetchData]);
 
   if (!isConnected) {

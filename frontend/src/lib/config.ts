@@ -1,6 +1,13 @@
 export const DEFAULT_TESTNET_PASSPHRASE = "Test SDF Network ; September 2015";
 export const DEFAULT_MAINNET_PASSPHRASE = "Public Global Stellar Network ; September 2015";
 
+export function getTransactionExplorerUrl(hash: string): string {
+  const base =
+    process.env.NEXT_PUBLIC_STELLAR_EXPLORER?.trim().replace(/\/+$/, "") ||
+    "https://stellar.expert/explorer/testnet";
+  return `${base}/tx/${encodeURIComponent(hash)}`;
+}
+
 export function getNetworkPassphrase(): string {
   if (typeof process !== "undefined" && process.env) {
     if (process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE) {

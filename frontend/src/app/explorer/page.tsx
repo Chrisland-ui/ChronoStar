@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { api } from '@/lib/api';
+import { api, getApiErrorMessage } from '@/lib/api';
 import { LedgerClock } from '@/components/LedgerClock';
+import { ExplorerSkeleton } from '@/components/Skeleton';
 import { ledgersToHuman } from '@/lib/utils';
+import { ExplorerSkeleton } from '@/components/Skeleton';
 import type { ScheduleEvent } from '@/types';
 
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
@@ -29,18 +31,23 @@ export default function ExplorerPage() {
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const activeRequest = useRef<AbortController | null>(null);
 
   const fetchEvents = useCallback(() => {
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
     setLoading(true);
     setError(null);
-    api.getEvents(100)
-      .then(setEvents)
-      .catch(() => setError('Failed to load events. Please check your connection and try again.'))
-      .finally(() => setLoading(false));
+    api.getEvents(100, { signal: controller.signal })
+      .then((items) => { if (!controller.signal.aborted) setEvents(items); })
+      .catch((err) => { if (!controller.signal.aborted) setError(getApiErrorMessage(err)); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
   }, []);
 
   useEffect(() => {
     fetchEvents();
+    return () => activeRequest.current?.abort();
   }, [fetchEvents]);
 
   if (loading) {
