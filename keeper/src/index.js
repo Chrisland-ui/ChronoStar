@@ -3,6 +3,7 @@ import { logger } from './logger.js';
 import { SorobanClient } from './soroban-client.js';
 import { VaultWatcher, StreamWatcher, DCAWatcher } from './watchers/index.js';
 import { createServer } from './http.js';
+import { registerKeeper, unregisterKeeper } from './registration.js';
 
 async function main() {
   logger.info('ChronoStar Keeper starting');
@@ -19,6 +20,9 @@ async function main() {
   const client = new SorobanClient();
   await client.init();
 
+  // #267 — register with the coordinator before any watcher starts polling.
+  await registerKeeper(client, config);
+
   const watchers = {
     vault: new VaultWatcher(client, config.vaultContractId),
     stream: new StreamWatcher(client, config.streamContractId),
@@ -31,10 +35,15 @@ async function main() {
 
   const server = createServer(watchers);
 
-  function shutdown() {
+  async function shutdown() {
     logger.info('shutting down');
     for (const w of Object.values(watchers)) w.stop();
     server.close();
+    // Release the registration so another keeper takes over immediately; never block exit for long.
+    await Promise.race([
+      unregisterKeeper(client, config),
+      new Promise(resolve => setTimeout(resolve, 10_000)),
+    ]);
     process.exit(0);
   }
 

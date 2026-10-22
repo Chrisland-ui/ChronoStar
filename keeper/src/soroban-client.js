@@ -1,5 +1,6 @@
 import {
   Account,
+  Address,
   BASE_FEE,
   Contract,
   Keypair,
@@ -68,6 +69,32 @@ export class SorobanClient {
     if (this.sourceKeypair) {
       this.sourceAccount = await this.server.getAccount(this.sourceKeypair.publicKey());
     }
+  }
+
+  /** Public key of the keeper account, or null when no secret is configured. */
+  keeperAddress() {
+    return this.sourceKeypair ? this.sourceKeypair.publicKey() : null;
+  }
+
+  _keeperArg() {
+    const address = this.keeperAddress();
+    if (!address) throw new Error("keeper secret required to register with the coordinator");
+    return new Address(address).toScVal();
+  }
+
+  /** Whether this keeper is already registered with the coordinator. */
+  async isRegistered(coordinatorId) {
+    return Boolean(await this.readContract(coordinatorId, "is_registered", [this._keeperArg()]));
+  }
+
+  /** Registers this keeper with the coordinator (retried with backoff by invokeContract). */
+  async register(coordinatorId, correlationId) {
+    return this.invokeContract(coordinatorId, "register", [this._keeperArg()], correlationId);
+  }
+
+  /** Removes this keeper's registration from the coordinator. */
+  async unregister(coordinatorId, correlationId) {
+    return this.invokeContract(coordinatorId, "unregister", [this._keeperArg()], correlationId);
   }
 
   async invokeContract(contractId, method, args, correlationId) {

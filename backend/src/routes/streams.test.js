@@ -3,15 +3,16 @@ import assert from "node:assert";
 import express from "express";
 import request from "supertest";
 import { createStreamsRouter, createDCARouter } from "./streams.js";
+import { SorobanClient } from "../soroban-client.js";
 
 const VALID_ADDRESS = "GBXGQJYF4VCR6J7QCRDMYNCHTSONGZXYQHG7OFNZFLZJGXA7ZUGA7AJE";
 
 function mockClient() {
   return {
     readContract: mock.fn(),
-    nativeToScv: (v) => v,
     scvU64: (v) => v,
     scvU32: (v) => v,
+    scvVecU64: mock.fn((values) => ({ vecU64: values })),
     scvAddress: (a) => a,
   };
 }
@@ -25,7 +26,6 @@ describe("GET /api/streams/:address", () => {
       if (method === "get_streams_by_owner") return [1];
       if (method === "get_streams_by_recipient") return null;
       if (method === "get_stream") return { id: 1, total_amount: 5000, status: 0 };
-      if (method === "get_claimables") return ["0"];
       return null;
     });
 
@@ -36,6 +36,67 @@ describe("GET /api/streams/:address", () => {
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.length, 1);
     assert.strictEqual(res.body[0].total_amount, 5000);
+  });
+
+  it("encodes ids as Vec<u64> and fills claimable_amount for each stream", async () => {
+    const client = mockClient();
+    client.readContract.mock.mockImplementation(async (id, method, args) => {
+      if (method === "get_streams_by_owner") return [1, 2];
+      if (method === "get_streams_by_recipient") return [2, 3];
+      if (method === "get_stream") return { id: args[0], total_amount: 5000, status: 0 };
+      if (method === "get_claimables") return [250, 0, 1200];
+      return null;
+    });
+
+    const app = express();
+    app.use("/api/streams", createStreamsRouter(client, "C..."));
+
+    const res = await request(app).get(`/api/streams/${VALID_ADDRESS}`);
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(client.scvVecU64.mock.calls[0].arguments[0], [1, 2, 3]);
+    const claimablesCall = client.readContract.mock.calls.find(
+      (c) => c.arguments[1] === "get_claimables",
+    );
+    assert.deepStrictEqual(claimablesCall.arguments[2], [{ vecU64: [1, 2, 3] }]);
+    assert.deepStrictEqual(
+      res.body.map((s) => [s.id, s.claimable_amount]),
+      [
+        [1, "250"],
+        [2, "0"],
+        [3, "1200"],
+      ],
+    );
+  });
+
+  it("defaults claimable_amount to 0 when the contract returns fewer values", async () => {
+    const client = mockClient();
+    client.readContract.mock.mockImplementation(async (id, method) => {
+      if (method === "get_streams_by_owner") return [1, 2];
+      if (method === "get_stream") return { total_amount: 5000, status: 0 };
+      if (method === "get_claimables") return [75];
+      return null;
+    });
+    const app = express();
+    app.use("/api/streams", createStreamsRouter(client, "C..."));
+
+    const res = await request(app).get(`/api/streams/${VALID_ADDRESS}`);
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(
+      res.body.map((s) => s.claimable_amount),
+      ["75", "0"],
+    );
+  });
+
+  it("returns an empty array without calling get_claimables when there are no streams", async () => {
+    const client = mockClient();
+    client.readContract.mock.mockImplementation(async () => null);
+    const app = express();
+    app.use("/api/streams", createStreamsRouter(client, "C..."));
+
+    const res = await request(app).get(`/api/streams/${VALID_ADDRESS}`);
+    assert.strictEqual(res.status, 200);
+    assert.deepStrictEqual(res.body, []);
+    assert.strictEqual(client.scvVecU64.mock.callCount(), 0);
   });
 
   it("rejects invalid address format", async () => {
@@ -120,10 +181,8 @@ describe("GET /api/dca/:address/:id/history", () => {
     assert.strictEqual(res.body.limit, 10);
     assert.deepStrictEqual(res.body.executions, []);
 
-    const call = client.readContract.mock.calls.find(
-      (c) => c.arguments[1] === "get_execution_history",
-    );
-    assert.deepStrictEqual(call.arguments[2], [1, 3, 10]);
+    const call = client.readContract.mock.calls.find((c) => c[1] === "get_execution_history");
+    assert.deepStrictEqual(call[2], [1, 3, 10]);
   });
 
   it("clamps limit to 50", async () => {
@@ -186,5 +245,38 @@ describe("GET /api/dca/:address/:id/history", () => {
     const res = await request(historyApp(client)).get("/api/dca/tooshort/1/history");
     assert.strictEqual(res.status, 400);
     assert.match(res.body.error, /Invalid Stellar address/);
+  });
+});
+
+describe("SorobanClient.scvVecU64", () => {
+  const client = new SorobanClient();
+
+  it("encodes ids as a vec of u64 values", () => {
+    const vec = client.scvVecU64([1, 2, 300]);
+    assert.strictEqual(vec.switch().name, "scvVec");
+    assert.deepStrictEqual(
+      vec.vec().map((v) => [v.switch().name, BigInt(v.u64().toString())]),
+      [
+        ["scvU64", 1n],
+        ["scvU64", 2n],
+        ["scvU64", 300n],
+      ],
+    );
+  });
+
+  it("encodes an empty list as an empty vec", () => {
+    assert.strictEqual(client.scvVecU64([]).vec().length, 0);
+  });
+
+  it("accepts numeric strings and bigints", () => {
+    const vec = client.scvVecU64(["7", 8n]);
+    assert.deepStrictEqual(
+      vec.vec().map((v) => BigInt(v.u64().toString())),
+      [7n, 8n],
+    );
+  });
+
+  it("rejects values that are not valid u64 ids", () => {
+    assert.throws(() => client.scvVecU64(["abc"]));
   });
 });

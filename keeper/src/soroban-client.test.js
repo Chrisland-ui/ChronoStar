@@ -1,9 +1,6 @@
-import { describe, it, mock } from 'node:test';
-import assert from 'node:assert/strict';
-import { SorobanClient } from './soroban-client.js';
 import { describe, it, mock } from "node:test";
 import assert from "node:assert";
-import { Account } from "@stellar/stellar-sdk";
+import { Account, Keypair } from "@stellar/stellar-sdk";
 import { SorobanClient } from "./soroban-client.js";
 import { config } from "./config.js";
 
@@ -31,12 +28,6 @@ describe("SorobanClient", () => {
       })),
     };
 
-    const result = await client.invokeContract('C123', 'test_method', [], 'test-correlation-id-12345');
-    assert.strictEqual(result.hash, 'txhash1234567890');
-    assert.strictEqual(result.correlationId, 'test-correlation-id-12345');
-  });
-
-  it('refreshes source account sequence on submission failure', async () => {
     client._assemble = mock.fn(() => ({
       sign: () => {},
     }));
@@ -62,7 +53,6 @@ describe("SorobanClient", () => {
     config.retryBaseDelayMs = 0;
 
     client.sourceKeypair = {
-      publicKey: () => 'GBANKKEY1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234',
       publicKey: () => TEST_ACCOUNT,
       sign: mock.fn(),
     };
@@ -72,19 +62,11 @@ describe("SorobanClient", () => {
         getAccountCalls++;
         return new Account(TEST_ACCOUNT, String(100 + getAccountCalls));
       }),
-      simulateTransaction: mock.fn(async () => ({ error: 'sim_error' })),
       simulateTransaction: mock.fn(async () => ({ error: "sim_error" })),
     };
 
     client.sourceAccount = new Account(TEST_ACCOUNT, "100");
 
-    await assert.rejects(
-      async () => {
-        await client.invokeContract('C123', 'test_method', []);
-      },
-      /test_method simulation failed: sim_error/
-    );
-    assert.strictEqual(getAccountCalls > 0, true);
     try {
       await assert.rejects(
         () => client.invokeContract(TEST_CONTRACT, "test_method", []),
@@ -95,5 +77,47 @@ describe("SorobanClient", () => {
       config.retryMaxAttempts = originalAttempts;
       config.retryBaseDelayMs = originalDelay;
     }
+  });
+});
+
+describe("SorobanClient coordinator registration", () => {
+  const keeper = Keypair.random().publicKey();
+
+  function registrationClient() {
+    const client = new SorobanClient();
+    client.sourceKeypair = { publicKey: () => keeper };
+    client.invokeContract = mock.fn(async () => ({ status: "SUCCESS", hash: "h" }));
+    client.readContract = mock.fn(async () => true);
+    return client;
+  }
+
+  it('register invokes the coordinator "register" with the keeper address', async () => {
+    const client = registrationClient();
+    await client.register("CCOORD");
+    const [contractId, method, args] = client.invokeContract.mock.calls[0].arguments;
+    assert.strictEqual(contractId, "CCOORD");
+    assert.strictEqual(method, "register");
+    assert.strictEqual(args.length, 1);
+    assert.strictEqual(args[0].type, "scvAddress");
+  });
+
+  it('unregister invokes the coordinator "unregister"', async () => {
+    const client = registrationClient();
+    await client.unregister("CCOORD");
+    assert.strictEqual(client.invokeContract.mock.calls[0].arguments[1], "unregister");
+  });
+
+  it("isRegistered reads is_registered and coerces to a boolean", async () => {
+    const client = registrationClient();
+    assert.strictEqual(await client.isRegistered("CCOORD"), true);
+    client.readContract = mock.fn(async () => undefined);
+    assert.strictEqual(await client.isRegistered("CCOORD"), false);
+    assert.strictEqual(client.readContract.mock.calls[0].arguments[1], "is_registered");
+  });
+
+  it("refuses to build a registration call without a keeper secret", async () => {
+    const client = new SorobanClient();
+    client.sourceKeypair = null;
+    await assert.rejects(client.register("CCOORD"), /keeper secret required/);
   });
 });

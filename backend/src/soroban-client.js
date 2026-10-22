@@ -62,6 +62,10 @@ export class SorobanClient {
   scvU32(val) {
     return xdr.ScVal.scvU32(Number(val));
   }
+  /** Encodes a list of ids as a Soroban `Vec<u64>`. */
+  scvVecU64(values) {
+    return xdr.ScVal.scvVec(values.map((v) => xdr.ScVal.scvU64(BigInt(v))));
+  }
   scvAddress(addr) {
     // Contracts only know account and contract addresses, so a muxed account
     // (M...) is looked up by the account it belongs to.
