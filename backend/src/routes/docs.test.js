@@ -42,5 +42,25 @@ describe('Docs Router', () => {
       const headers = Object.keys(res.body.components.responses[response].headers);
       assert.deepStrictEqual(headers.sort(), ['RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset', 'Retry-After']);
     }
+  it('uses the trusted forwarded HTTPS origin', async () => {
+    const app = express();
+    app.set('trust proxy', 1);
+    app.use('/api', createDocsRouter(openapiPath));
+
+    const res = await request(app)
+      .get('/api/openapi.json')
+      .set('Host', 'internal:3001')
+      .set('X-Forwarded-Proto', 'https')
+      .set('X-Forwarded-Host', 'api.chronostar.example');
+
+    assert.strictEqual(res.body.servers[0].url, 'https://api.chronostar.example');
+  });
+
+  it('prefers an explicitly configured public URL', async () => {
+    const app = express();
+    app.use('/api', createDocsRouter(openapiPath, 'https://public.example'));
+
+    const res = await request(app).get('/api/openapi.json');
+    assert.strictEqual(res.body.servers[0].url, 'https://public.example');
   });
 });

@@ -1,8 +1,8 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
 use soroban_sdk::{
-    contract, contractimpl, contractmeta, contracttype, symbol_short, token, Address, Env, String,
-    Vec,
+    contract, contracterror, contractimpl, contractmeta, contracttype, symbol_short, token,
+    Address, Env, String, Vec,
 };
 
 const MAX_LABEL_LEN: u32 = 64;
@@ -13,6 +13,24 @@ contractmeta!(
     key = "description",
     val = "Time-locked Stellar token vaults"
 );
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Error {
+    AmountMustBePositive = 1,
+    ReleaseLedgerMustBeInFuture = 2,
+    LabelCannotBeEmpty = 3,
+    LabelCannotBeBlank = 4,
+    LabelTooLong = 5,
+    ExpiryMustBeAfterReleaseLedger = 6,
+    BatchMustNotBeEmpty = 7,
+    BatchExceedsMaxSize = 8,
+    VaultNotActive = 9,
+    TooEarlyToRelease = 10,
+    CannotCancelAfterReleaseLedger = 11,
+    VaultNotPaused = 12,
+    VaultNotYetExpired = 13,
+}
 
 pub const MAX_BATCH_SIZE: u32 = 50;
 
@@ -71,27 +89,32 @@ impl ScheduleVault {
         release_ledger: u32,
         label: String,
         expires_after_ledger: Option<u32>,
-    ) -> u64 {
+    ) -> Result<u64, Error> {
         owner.require_auth();
-        assert!(amount > 0, "amount must be positive");
-        assert!(
-            release_ledger > env.ledger().sequence(),
-            "release_ledger must be in the future"
-        );
-        assert!(!label.is_empty(), "label cannot be empty");
-        assert!(label.len() <= MAX_LABEL_LEN, "label max 64 chars");
+        if amount <= 0 {
+            return Err(Error::AmountMustBePositive);
+        }
+        if release_ledger <= env.ledger().sequence() {
+            return Err(Error::ReleaseLedgerMustBeInFuture);
+        }
+        if label.is_empty() {
+            return Err(Error::LabelCannotBeEmpty);
+        }
+        if label.len() > MAX_LABEL_LEN {
+            return Err(Error::LabelTooLong);
+        }
         let mut buf = [0u8; MAX_LABEL_LEN as usize];
         label.copy_into_slice(&mut buf[..label.len() as usize]);
         let all_ws = buf[..label.len() as usize]
             .iter()
             .all(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n'));
-        assert!(!all_ws, "label cannot be blank");
-        assert!(label.len() <= 64, "label max 64 chars");
+        if all_ws {
+            return Err(Error::LabelCannotBeBlank);
+        }
         if let Some(expiry) = expires_after_ledger {
-            assert!(
-                expiry > release_ledger,
-                "expiry must be strictly greater than release_ledger"
-            );
+            if expiry <= release_ledger {
+                return Err(Error::ExpiryMustBeAfterReleaseLedger);
+            }
         }
 
         let token_client = token::Client::new(&env, &token);
@@ -169,7 +192,7 @@ impl ScheduleVault {
             },
         );
 
-        id
+        Ok(id)
     }
 
     pub fn create_vaults(
@@ -180,18 +203,25 @@ impl ScheduleVault {
         amount: i128,
         release_ledger: u32,
         label_prefix: String,
-    ) -> Vec<u64> {
+    ) -> Result<Vec<u64>, Error> {
         owner.require_auth();
-        assert!(amount > 0, "amount must be positive");
-        assert!(
-            release_ledger > env.ledger().sequence(),
-            "release_ledger must be in the future"
-        );
-        assert!(label_prefix.len() <= 64, "label max 64 chars");
+        if amount <= 0 {
+            return Err(Error::AmountMustBePositive);
+        }
+        if release_ledger <= env.ledger().sequence() {
+            return Err(Error::ReleaseLedgerMustBeInFuture);
+        }
+        if label_prefix.len() > 64 {
+            return Err(Error::LabelTooLong);
+        }
 
         let count = recipients.len();
-        assert!(count > 0, "batch must not be empty");
-        assert!(count <= MAX_BATCH_SIZE, "batch exceeds MAX_BATCH_SIZE");
+        if count == 0 {
+            return Err(Error::BatchMustNotBeEmpty);
+        }
+        if count > MAX_BATCH_SIZE {
+            return Err(Error::BatchExceedsMaxSize);
+        }
 
         let total: i128 = amount
             .checked_mul(count as i128)
@@ -261,21 +291,22 @@ impl ScheduleVault {
         env.events()
             .publish((symbol_short!("batch"), created_ledger), ids.clone());
 
-        ids
+        Ok(ids)
     }
 
-    pub fn release(env: Env, vault_id: u64) {
+    pub fn release(env: Env, vault_id: u64) -> Result<(), Error> {
         let mut vault: VaultEntry = env
             .storage()
             .persistent()
             .get(&DataKey::Vault(vault_id))
             .expect("vault not found");
 
-        assert!(vault.status == VaultStatus::Active, "vault not active");
-        assert!(
-            env.ledger().sequence() >= vault.release_ledger,
-            "too early to release"
-        );
+        if vault.status != VaultStatus::Active {
+            return Err(Error::VaultNotActive);
+        }
+        if env.ledger().sequence() < vault.release_ledger {
+            return Err(Error::TooEarlyToRelease);
+        }
 
         vault.status = VaultStatus::Released;
         env.storage()
@@ -297,9 +328,11 @@ impl ScheduleVault {
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::Vault(vault_id), 6_312_000, 6_312_000);
+
+        Ok(())
     }
 
-    pub fn cancel(env: Env, vault_id: u64) {
+    pub fn cancel(env: Env, vault_id: u64) -> Result<(), Error> {
         let mut vault: VaultEntry = env
             .storage()
             .persistent()
@@ -307,11 +340,12 @@ impl ScheduleVault {
             .expect("vault not found");
 
         vault.owner.require_auth();
-        assert!(vault.status == VaultStatus::Active, "vault not active");
-        assert!(
-            env.ledger().sequence() < vault.release_ledger,
-            "cannot cancel after release ledger"
-        );
+        if vault.status != VaultStatus::Active {
+            return Err(Error::VaultNotActive);
+        }
+        if env.ledger().sequence() >= vault.release_ledger {
+            return Err(Error::CannotCancelAfterReleaseLedger);
+        }
 
         vault.status = VaultStatus::Cancelled;
         env.storage()
@@ -322,9 +356,11 @@ impl ScheduleVault {
         token_client.transfer(&env.current_contract_address(), &vault.owner, &vault.amount);
         env.events()
             .publish((symbol_short!("cancelled"), vault_id), vault.owner.clone());
+
+        Ok(())
     }
 
-    pub fn transfer_ownership(env: Env, vault_id: u64, new_owner: Address) {
+    pub fn transfer_ownership(env: Env, vault_id: u64, new_owner: Address) -> Result<(), Error> {
         let mut vault: VaultEntry = env
             .storage()
             .persistent()
@@ -332,7 +368,9 @@ impl ScheduleVault {
             .expect("vault not found");
 
         vault.owner.require_auth();
-        assert!(vault.status == VaultStatus::Active, "vault not active");
+        if vault.status != VaultStatus::Active {
+            return Err(Error::VaultNotActive);
+        }
 
         let mut old_owner_vaults: Vec<u64> = env
             .storage()
@@ -378,9 +416,11 @@ impl ScheduleVault {
 
         env.events()
             .publish((symbol_short!("transfer"), vault_id), new_owner);
+
+        Ok(())
     }
 
-    pub fn pause(env: Env, vault_id: u64) {
+    pub fn pause(env: Env, vault_id: u64) -> Result<(), Error> {
         let mut vault: VaultEntry = env
             .storage()
             .persistent()
@@ -388,7 +428,9 @@ impl ScheduleVault {
             .expect("vault not found");
 
         vault.owner.require_auth();
-        assert!(vault.status == VaultStatus::Active, "vault not active");
+        if vault.status != VaultStatus::Active {
+            return Err(Error::VaultNotActive);
+        }
 
         vault.status = VaultStatus::Paused;
         vault.paused_at_ledger = Some(env.ledger().sequence());
@@ -399,9 +441,11 @@ impl ScheduleVault {
 
         env.events()
             .publish((symbol_short!("paused"), vault_id), vault.owner.clone());
+
+        Ok(())
     }
 
-    pub fn resume(env: Env, vault_id: u64) {
+    pub fn resume(env: Env, vault_id: u64) -> Result<(), Error> {
         let mut vault: VaultEntry = env
             .storage()
             .persistent()
@@ -409,7 +453,9 @@ impl ScheduleVault {
             .expect("vault not found");
 
         vault.owner.require_auth();
-        assert!(vault.status == VaultStatus::Paused, "vault not paused");
+        if vault.status != VaultStatus::Paused {
+            return Err(Error::VaultNotPaused);
+        }
 
         vault.status = VaultStatus::Active;
         vault.paused_at_ledger = None;
@@ -420,9 +466,11 @@ impl ScheduleVault {
 
         env.events()
             .publish((symbol_short!("resumed"), vault_id), vault.owner.clone());
+
+        Ok(())
     }
 
-    pub fn reclaim(env: Env, vault_id: u64) {
+    pub fn reclaim(env: Env, vault_id: u64) -> Result<(), Error> {
         let mut vault: VaultEntry = env
             .storage()
             .persistent()
@@ -430,11 +478,15 @@ impl ScheduleVault {
             .expect("vault not found");
 
         vault.owner.require_auth();
-        assert!(vault.status == VaultStatus::Active, "vault not active");
+        if vault.status != VaultStatus::Active {
+            return Err(Error::VaultNotActive);
+        }
 
         let current_ledger = env.ledger().sequence();
         let expiry = vault.expires_after_ledger.expect("vault has no expiry");
-        assert!(current_ledger > expiry, "vault not yet expired");
+        if current_ledger <= expiry {
+            return Err(Error::VaultNotYetExpired);
+        }
 
         vault.status = VaultStatus::Reclaimed;
         env.storage()
@@ -446,6 +498,8 @@ impl ScheduleVault {
 
         env.events()
             .publish((symbol_short!("reclaimed"), vault_id), vault.owner.clone());
+
+        Ok(())
     }
 
     pub fn get_vault(env: Env, vault_id: u64) -> Option<VaultEntry> {

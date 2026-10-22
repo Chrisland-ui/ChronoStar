@@ -12,6 +12,14 @@ import {
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 
+export class ContractSimulationError extends Error {
+  constructor(diagnostic) {
+    super(`Soroban simulation failed: ${diagnostic}`);
+    this.name = "ContractSimulationError";
+    this.statusCode = 502;
+  }
+}
+
 export class SorobanClient {
   constructor() {
     const isInsecureHttp = config.rpcUrl.startsWith("http://");
@@ -37,6 +45,13 @@ export class SorobanClient {
 
   async readContract(contractId, method, args) {
     const sim = await this.simulate(contractId, method, args);
+    if (rpc.Api.isSimulationError(sim) || sim?.error) {
+      const diagnostic =
+        typeof sim?.error === "string"
+          ? sim.error
+          : sim?.error?.message || sim?.error?.toString?.() || "unknown RPC error";
+      throw new ContractSimulationError(diagnostic);
+    }
     if (!sim?.result?.retval) return null;
     return normalizeNative(scValToNative(sim.result.retval));
   }

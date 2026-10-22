@@ -2,8 +2,8 @@
 use soroban_sdk{
 #`!no_std]
 use soroban_sdk({
-    contract, contractimpl, contractmeta, contracttype, symbol_short, token, Address, Env, String,
-    Symbol, Vec,
+    contract, contracterror, contractimpl, contractmeta, contracttype, symbol_short, token,
+    Address, Env, String, Symbol, Vec,
 };
 
 const MAX_LABEL_LEN: u32 = 64;
@@ -14,6 +14,24 @@ contractmeta!(
     key = "description",
     val = "Recurring Stellar token payment streams"
 );
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Error {
+    AmountMustBePositive = 1,
+    MinimumDurationIs60Ledgers = 2,
+    LabelCannotBeEmpty = 3,
+    LabelCannotBeBlank = 4,
+    LabelTooLong = 5,
+    UseCreateStreamForSingleRecipient = 6,
+    SharesMustSumTo10000 = 7,
+    CallerNotInSplits = 8,
+    CallerNotRecipient = 9,
+    StreamNotActive = 10,
+    StreamNotPaused = 11,
+    StreamHasNotStartedYet = 12,
+    NothingToClaim = 13,
+}
 
 #[contracttype]
 pub enum DataKey {
@@ -47,9 +65,9 @@ pub struct StreamEntry {
     pub label: String,
     pub grace_period_ledgers: u32,
     pub status: StreamStatus,
-    // Ledger at which the stream was last paused. Zero when not paused.
+    
     pub paused_at_ledger: u32,
-    // Total number of ledgers the stream has been paused across all pauses.
+    
     pub paused_ledgers: u32,
 }
 
@@ -128,21 +146,28 @@ impl RecurringStream {
         grace_period_ledgers: u32,
         label: String,
         start_delay_ledgers: u32,
-    ) -> u64 {
+    ) -> Result<u64, Error> {
         owner.require_auth();
-        assert!(total_amount > 0, "amount must be positive");
-        assert!(
-            duration_ledgers >= 60,
-            "minimum duration is 60 ledgers (~5 min)"
-        );
-        assert!(label.len() != 0, "label cannot be empty");
-        assert!(label.len() <= MAX_LABEL_LEN, "label max 64 chars");
+        if total_amount <= 0 {
+            return Err(Error::AmountMustBePositive);
+        }
+        if duration_ledgers < 60 {
+            return Err(Error::MinimumDurationIs60Ledgers);
+        }
+        if label.len() == 0 {
+            return Err(Error::LabelCannotBeEmpty);
+        }
+        if label.len() > MAX_LABEL_LEN {
+            return Err(Error::LabelTooLong);
+        }
         let mut buf = [0u8; MAX_LABEL_LEN as usize];
         label.copy_into_slice(&mut buf[..label.len() as usize]);
         let all_ws = buf[..label.len() as usize]
             .iter()
             .all(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n'));
-        assert!(!all_ws, "label cannot be blank");
+        if all_ws {
+            return Err(Error::LabelCannotBeBlank);
+        }
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer_from(
@@ -228,7 +253,7 @@ impl RecurringStream {
             },
         );
 
-        id
+        Ok(id)
     }
 
     pub fn create_split_stream(
@@ -239,20 +264,25 @@ impl RecurringStream {
         total_amount: i128,
         duration_ledgers: u32,
         label: String,
-    ) -> u64 {
+    ) -> Result<u64, Error> {
         owner.require_auth();
-        assert!(total_amount > 0, "amount must be positive");
-        assert!(
-            duration_ledgers >= 60,
-            "minimum duration is 60 ledgers (~5 min)"
-        );
-        assert!(splits.len() > 1, "use create_stream for single recipient");
+        if total_amount <= 0 {
+            return Err(Error::AmountMustBePositive);
+        }
+        if duration_ledgers < 60 {
+            return Err(Error::MinimumDurationIs60Ledgers);
+        }
+        if splits.len() <= 1 {
+            return Err(Error::UseCreateStreamForSingleRecipient);
+        }
 
         let mut total_share: u16 = 0;
         for split in splits.iter() {
             total_share += split.share;
         }
-        assert!(total_share == 10000, "shares must sum to 10000");
+        if total_share != 10000 {
+            return Err(Error::SharesMustSumTo10000);
+        }
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer_from(
@@ -335,10 +365,10 @@ impl RecurringStream {
 
         env.storage().instance().extend_ttl(100_000, 100_000);
 
-        id
+        Ok(id)
     }
 
-    pub fn claim(env: Env, caller: Address, stream_id: u64) -> i128 {
+    pub fn claim(env: Env, caller: Address, stream_id: u64) -> Result<i128, Error> {
         let mut stream: StreamEntry = env
             .storage()
             .persistent()
@@ -360,20 +390,25 @@ impl RecurringStream {
                     break;
                 }
             }
-            assert!(found, "caller not in splits");
-        } else {
-            assert!(caller == stream.recipient, "caller not recipient");
+            if !found {
+                return Err(Error::CallerNotInSplits);
+            }
+        } else if caller != stream.recipient {
+            return Err(Error::CallerNotRecipient);
         }
 
-        assert!(stream.status == StreamStatus::Active, "stream not active");
+        if stream.status != StreamStatus::Active {
+            return Err(Error::StreamNotActive);
+        }
 
         let current = env.ledger().sequence();
-        assert!(
-            current >= stream.start_ledger,
-            "stream has not started yet"
-        );
+        if current < stream.start_ledger {
+            return Err(Error::StreamHasNotStartedYet);
+        }
         let claimable = stream.claimable_amount(current);
-        assert!(claimable > 0, "nothing to claim");
+        if claimable <= 0 {
+            return Err(Error::NothingToClaim);
+        }
 
         stream.claimed_amount += claimable;
         stream.last_claimed_ledger = current;
@@ -428,7 +463,7 @@ impl RecurringStream {
             );
         }
 
-        claimable
+        Ok(claimable)
     }
 
     pub fn tick(env: Env, stream_id: u64) {
@@ -476,7 +511,7 @@ impl RecurringStream {
 
     /// Pause an active stream. Only the owner may pause.
     /// Vesting is frozen from the current ledger onward until resume.
-    pub fn pause(env: Env, stream_id: u64) {
+    pub fn pause(env: Env, stream_id: u64) -> Result<(), Error> {
         let mut stream: StreamEntry = env
             .storage()
             .persistent()
@@ -484,10 +519,9 @@ impl RecurringStream {
             .expect("stream not found");
 
         stream.owner.require_auth();
-        assert!(
-            stream.status == StreamStatus::Active,
-            "stream not active"
-        );
+        if stream.status != StreamStatus::Active {
+            return Err(Error::StreamNotActive);
+        }
 
         let current = env.ledger().sequence();
         stream.status = StreamStatus::Paused;
@@ -502,12 +536,14 @@ impl RecurringStream {
 
         env.events()
             .publish((symbol_short!("paused"), stream_id), current);
+
+        Ok(())
     }
 
     /// Resume a paused stream. Only the owner may resume.
     /// The paused interval is accumulated into `paused_ledgers` so it is
     /// never counted as vested time.
-    pub fn resume(env: Env, stream_id: u64) {
+    pub fn resume(env: Env, stream_id: u64) -> Result<(), Error> {
         let mut stream: StreamEntry = env
             .storage()
             .persistent()
@@ -515,10 +551,9 @@ impl RecurringStream {
             .expect("stream not found");
 
         stream.owner.require_auth();
-        assert!(
-            stream.status == StreamStatus::Paused,
-            "stream not paused"
-        );
+        if stream.status != StreamStatus::Paused {
+            return Err(Error::StreamNotPaused);
+        }
 
         let current = env.ledger().sequence();
         let effective_current = current.min(stream.end_ledger);
@@ -540,9 +575,11 @@ impl RecurringStream {
 
         env.events()
             .publish((symbol_short!("resumed"), stream_id), current);
+
+        Ok(())
     }
 
-    pub fn cancel(env: Env, stream_id: u64) {
+    pub fn cancel(env: Env, stream_id: u64) -> Result<(), Error> {
         let mut stream: StreamEntry = env
             .storage()
             .persistent()
@@ -550,11 +587,9 @@ impl RecurringStream {
             .expect("stream not found");
 
         stream.owner.require_auth();
-        assert!(
-            stream.status == StreamStatus::Active
-                || stream.status == StreamStatus::Paused,
-            "stream not active"
-        );
+        if stream.status != StreamStatus::Active && stream.status != StreamStatus::Paused {
+            return Err(Error::StreamNotActive);
+        }
 
         let current = env.ledger().sequence();
 
@@ -621,9 +656,11 @@ impl RecurringStream {
             (symbol_short!("cancelled"), stream_id),
             stream.owner.clone(),
         );
+
+        Ok(())
     }
 
-    pub fn change_recipient(env: Env, stream_id: u64, new_recipient: Address) {
+    pub fn change_recipient(env: Env, stream_id: u64, new_recipient: Address) -> Result<(), Error> {
         let mut stream: StreamEntry = env
             .storage()
             .persistent()
@@ -631,7 +668,9 @@ impl RecurringStream {
             .expect("stream not found");
 
         stream.owner.require_auth();
-        assert!(stream.status == StreamStatus::Active, "stream not active");
+        if stream.status != StreamStatus::Active {
+            return Err(Error::StreamNotActive);
+        }
 
         let old_recipient = stream.recipient.clone();
         if old_recipient != new_recipient {
@@ -685,6 +724,8 @@ impl RecurringStream {
             (Symbol::new(&env, "recipient_changed"), stream_id),
             (old_recipient, new_recipient),
         );
+
+        Ok(())
     }
 
     pub fn get_stream(env: Env, stream_id: u64) -> Option<StreamEntry> {

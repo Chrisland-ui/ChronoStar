@@ -1,9 +1,18 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{
+    contract, contractimpl, contractmeta, contracttype, symbol_short, Address, Env, Symbol,
+};
 
 const MAX_LOCK_TTL_LEDGERS: u32 = 1_000;
 const STORAGE_TTL_LEDGERS: u32 = 100_000;
+
+contractmeta!(key = "name", val = "ChronoStar Keeper Coordinator");
+contractmeta!(key = "version", val = "0.1.0");
+contractmeta!(
+    key = "description",
+    val = "Exclusive claim ledger that stops two keepers executing the same schedule"
+);
 
 
 
