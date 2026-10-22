@@ -3,9 +3,9 @@
 ![ChronoStar](docs/assets/chronostar-logo-lockup.svg)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![Test Contracts](https://github.com/aadviksinghdebug/ChronoStar/actions/workflows/test-contracts.yml/badge.svg)](https://github.com/aadviksinghdebug/ChronoStar/actions/workflows/test-contracts.yml)
-[![Test Keeper](https://github.com/aadviksinghdebug/ChronoStar/actions/workflows/test-keeper.yml/badge.svg)](https://github.com/aadviksinghdebug/ChronoStar/actions/workflows/test-keeper.yml)
-[![Deploy Docs](https://github.com/aadviksinghdebug/ChronoStar/actions/workflows/deploy-docs.yml/badge.svg)](https://github.com/aadviksinghdebug/ChronoStar/actions/workflows/deploy-docs.yml)
+[![Test Contracts](https://github.com/Chronostar-Protocol/ChronoStar/actions/workflows/test-contracts.yml/badge.svg)](https://github.com/Chronostar-Protocol/ChronoStar/actions/workflows/test-contracts.yml)
+[![Test Keeper](https://github.com/Chronostar-Protocol/ChronoStar/actions/workflows/test-keeper.yml/badge.svg)](https://github.com/Chronostar-Protocol/ChronoStar/actions/workflows/test-keeper.yml)
+[![Deploy Docs](https://github.com/Chronostar-Protocol/ChronoStar/actions/workflows/deploy-docs.yml/badge.svg)](https://github.com/Chronostar-Protocol/ChronoStar/actions/workflows/deploy-docs.yml)
 
 Time-based payment primitives for the Stellar ecosystem: time-locked vaults, recurring payment streams, and on-chain DCA policies.
 
@@ -100,7 +100,7 @@ npm install
 npm start
 ```
 
-The keeper can be deployed on Render as a Background Worker using `keeper/render.yaml`.
+The keeper and backend services can be deployed on Render using the root blueprint [`render.yaml`](./render.yaml) (`chronostar-backend` web service and `chronostar-keeper` background worker).
 
 ## API Endpoints
 
@@ -147,8 +147,7 @@ chronostar/
 
 ## Contributing
 
-New to the project? Start with a [`good-first-issue`](https://github.com/0xratnendra/ChronoStar/labels/good-first-issue) — [CONTRIBUTING.md](./CONTRIBUTING.md) covers setup, conventions, and the review process. Everyone participating is expected to follow the [Code of Conduct](./CODE_OF_CONDUCT.md). Release history lives in [CHANGELOG.md](./CHANGELOG.md) and upcoming milestones in [ROADMAP.md](./ROADMAP.md).
-See [CONTRIBUTING.md](./CONTRIBUTING.md) and our [Good-First-Issue Onboarding Curriculum](file:///C:/Users/JUST%20J/repos/ChronoStar/docs/src/content/docs/getting-started/onboarding-curriculum.md) for setup checklists, curated starter tasks, and how to pick up a `good-first-issue`. All contributors must follow the [Code of Conduct](./CODE_OF_CONDUCT.md). See [CHANGELOG.md](./CHANGELOG.md) for release history and [ROADMAP.md](./ROADMAP.md) for upcoming milestones.
+New to the project? Start with a [`good-first-issue`](https://github.com/Chronostar-Protocol/ChronoStar/labels/good-first-issue) — see [CONTRIBUTING.md](./CONTRIBUTING.md) and our [Good-First-Issue Onboarding Curriculum](./docs/src/content/docs/getting-started/onboarding-curriculum.md) for setup checklists, conventions, curated starter tasks, and the review process. Everyone participating is expected to follow the [Code of Conduct](./CODE_OF_CONDUCT.md). Release history lives in [CHANGELOG.md](./CHANGELOG.md) and upcoming milestones in [ROADMAP.md](./ROADMAP.md).
 
 ## License
 
