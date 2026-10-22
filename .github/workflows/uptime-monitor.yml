@@ -2,14 +2,20 @@ name: Service Uptime & Health Check Monitor
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
-jobs:
-  uptime-check:
-    name: Check Service Health
-    runs-on: ubuntu-latest
+concurrency:
+  group: uptime-monitor
+  cancel-in-progress: true
 
+permissions:
+  contents: read
+
+jobs:
+  check-backend:
+    name: Check Backend Health
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -18,24 +24,42 @@ jobs:
         run: |
           BACKEND_URL="${{ secrets.BACKEND_HEALTH_URL || 'https://chronostar-backend-s905.onrender.com/healthz' }}"
           echo "Polling Backend Health Endpoint: $BACKEND_URL"
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "$BACKEND_URL")
-          if [ "$RESPONSE" -ne 200 ]; then
-            echo "❌ Backend health check failed with status code $RESPONSE"
+          RESPONSE=$(curl -sS --fail-with-body --connect-timeout 5 --max-time 15 "$BACKEND_URL") || {
+            echo "❌ Backend request failed (network error or timeout)"
+            exit 1
+          }
+          echo "Response body: $RESPONSE"
+          STATUS=$(echo "$RESPONSE" | jq -r '.status // empty')
+          if [ "$STATUS" != "ok" ]; then
+            echo "❌ Backend health check failed: status is '$STATUS' (expected 'ok')"
             exit 1
           fi
-          echo "✅ Backend is healthy (HTTP 200)"
+          echo "✅ Backend is healthy (status: ok)"
 
-      - name: Check Keeper Health (if configured)
+  check-keeper:
+    name: Check Keeper Health
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Check Keeper Health
         run: |
-          KEEPER_URL="${{ secrets.KEEPER_HEALTH_URL }}"
-          if [ -n "$KEEPER_URL" ]; then
-            echo "Polling Keeper Health Endpoint: $KEEPER_URL"
-            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "$KEEPER_URL")
-            if [ "$RESPONSE" -ne 200 ]; then
-              echo "❌ Keeper health check failed with status code $RESPONSE"
-              exit 1
-            fi
-            echo "✅ Keeper is healthy (HTTP 200)"
-          else
-            echo "ℹ️ KEEPER_HEALTH_URL secret not set, skipping remote keeper HTTP check"
+          KEEPER_URL="${{ secrets.KEEPER_HEALTH_URL || 'https://chronostar-keeper.onrender.com/healthz' }}"
+          echo "Polling Keeper Health Endpoint: $KEEPER_URL"
+          RESPONSE=$(curl -sS --fail-with-body --connect-timeout 5 --max-time 15 "$KEEPER_URL") || {
+            echo "❌ Keeper request failed (network error or timeout)"
+            exit 1
+          }
+          echo "Response body: $RESPONSE"
+          STATUS=$(echo "$RESPONSE" | jq -r '.status // empty')
+          if [ "$STATUS" = "degraded" ]; then
+            STALE_COUNT=$(echo "$RESPONSE" | jq -r '.staleWatchers // 0')
+            echo "❌ Keeper health check degraded with $STALE_COUNT stale watcher(s)"
+            exit 1
           fi
+          if [ "$STATUS" != "ok" ]; then
+            echo "❌ Keeper health check failed: status is '$STATUS' (expected 'ok')"
+            exit 1
+          fi
+          echo "✅ Keeper is healthy (status: ok)"

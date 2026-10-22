@@ -5,14 +5,30 @@ import type {
   DCAExecutionHistory,
   ScheduleEvent,
   Stats,
-} from '@/types';
+} from "@/types";
+import { captureException, addBreadcrumb } from "./sentry";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 async function fetchJSON<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`);
-  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
-  return res.json();
+  addBreadcrumb({
+    category: "api",
+    message: `Fetching ${path}`,
+    level: "info",
+  });
+
+  try {
+    const res = await fetch(`${BASE_URL}${path}`);
+    if (!res.ok) {
+      const error = new Error(`API ${res.status}: ${res.statusText}`);
+      captureException(error, { path, status: res.status, statusText: res.statusText });
+      throw error;
+    }
+    return res.json();
+  } catch (err) {
+    captureException(err, { path });
+    throw err;
+  }
 }
 
 export const api = {
@@ -23,6 +39,7 @@ export const api = {
     fetchJSON<DCAExecutionHistory>(
       `/api/dca/${address}/${dcaId}/history?start=${start}&limit=${limit}`,
     ),
-  getEvents: (limit?: number) => fetchJSON<ScheduleEvent[]>(`/api/events${limit ? `?limit=${limit}` : ''}`),
-  getStats: () => fetchJSON<Stats>('/api/stats'),
+  getEvents: (limit?: number) =>
+    fetchJSON<ScheduleEvent[]>(`/api/events${limit ? `?limit=${limit}` : ""}`),
+  getStats: () => fetchJSON<Stats>("/api/stats"),
 };

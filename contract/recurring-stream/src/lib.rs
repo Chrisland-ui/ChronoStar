@@ -47,9 +47,9 @@ pub struct StreamEntry {
     pub label: String,
     pub grace_period_ledgers: u32,
     pub status: StreamStatus,
-    // Ledger at which the stream was last paused. Zero when not paused.
+    
     pub paused_at_ledger: u32,
-    // Total number of ledgers the stream has been paused across all pauses.
+    
     pub paused_ledgers: u32,
 }
 

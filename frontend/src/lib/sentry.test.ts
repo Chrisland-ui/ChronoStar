@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { isUserRejectionError, initSentry, addBreadcrumb, captureException } from "./sentry";
 
-describe("Frontend Sentry Monitoring", () => {
+describe("Frontend Sentry Monitoring (#292)", () => {
   const originalEnv = process.env;
 
   beforeEach(() => {
@@ -44,6 +44,15 @@ describe("Frontend Sentry Monitoring", () => {
     captureException(new Error("Backend API 500 error"), { vaultId: "V123" });
 
     expect(consoleSpy).toHaveBeenCalled();
+    consoleSpy.mockRestore();
+  });
+
+  it("drops user rejection from captureException and adds a benign breadcrumb", () => {
+    process.env.NEXT_PUBLIC_SENTRY_DSN = "https://public@sentry.example.com/1";
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    captureException(new Error("User declined transaction"));
+    expect(consoleSpy).not.toHaveBeenCalled();
     consoleSpy.mockRestore();
   });
 });

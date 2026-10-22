@@ -14,12 +14,14 @@ export default function CreateVaultPage() {
   const [releaseLedger, setReleaseLedger] = useState('');
   const [label, setLabel] = useState('');
   const [txStatus, setTxStatus] = useState<'pending' | 'success' | 'error' | null>(null);
+  const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!address || txStatus === 'pending') return;
     setTxStatus('pending');
+    setTxHash(null);
     setErrorMessage(undefined);
 
     try {

@@ -16,9 +16,21 @@ const USER_REJECTION_PATTERNS = [
 
 export function isUserRejectionError(error: unknown): boolean {
   if (!error) return false;
-  const msg = typeof error === "string" ? error : error instanceof Error ? error.message : JSON.stringify(error);
+  const msg =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : JSON.stringify(error);
   const lower = msg.toLowerCase();
   return USER_REJECTION_PATTERNS.some((pattern) => lower.includes(pattern));
+}
+
+let sentrySDK: any = null;
+try {
+  sentrySDK = require("@sentry/nextjs");
+} catch {
+  // Not installed or bundled in current environment
 }
 
 export function initSentry(): boolean {
@@ -40,19 +52,46 @@ export function initSentry(): boolean {
     };
   }
 
+  if (sentrySDK && typeof sentrySDK.init === "function") {
+    sentrySDK.init({
+      dsn,
+      environment,
+      release,
+      beforeSend(event: any, hint: any) {
+        if (hint && isUserRejectionError(hint.originalException)) {
+          return null; // drop user rejection errors from Sentry telemetry
+        }
+        return event;
+      },
+    });
+  }
+
   return true;
 }
 
+// Client-only breadcrumb buffer to prevent cross-request leakage on the server
 const breadcrumbsBuffer: SentryBreadcrumb[] = [];
 
 export function addBreadcrumb(crumb: SentryBreadcrumb): void {
-  if (breadcrumbsBuffer.length >= 50) {
-    breadcrumbsBuffer.shift();
+  // Only maintain memory buffer in browser environment
+  if (typeof window !== "undefined") {
+    if (breadcrumbsBuffer.length >= 50) {
+      breadcrumbsBuffer.shift();
+    }
+    breadcrumbsBuffer.push({
+      ...crumb,
+      level: crumb.level || "info",
+    });
   }
-  breadcrumbsBuffer.push({
-    ...crumb,
-    level: crumb.level || "info",
-  });
+
+  if (sentrySDK && typeof sentrySDK.addBreadcrumb === "function") {
+    sentrySDK.addBreadcrumb({
+      category: crumb.category,
+      message: crumb.message,
+      level: crumb.level || "info",
+      data: crumb.data,
+    });
+  }
 
   if (process.env.NODE_ENV !== "production") {
     console.debug(`[Sentry Breadcrumb][${crumb.category}]`, crumb.message, crumb.data || "");
@@ -61,7 +100,7 @@ export function addBreadcrumb(crumb: SentryBreadcrumb): void {
 
 export function captureException(error: unknown, context?: Record<string, unknown>): void {
   if (isUserRejectionError(error)) {
-    // Filter out user-rejected signatures so signal stays clean
+    // Filter out user-rejected signatures so telemetry signal stays clean
     addBreadcrumb({
       category: "wallet",
       message: "User declined transaction signature (filtered from telemetry)",
@@ -76,11 +115,15 @@ export function captureException(error: unknown, context?: Record<string, unknow
     return;
   }
 
+  if (sentrySDK && typeof sentrySDK.captureException === "function") {
+    sentrySDK.captureException(error, { extra: context });
+  }
+
   console.error("[Sentry Exception]", error, {
     environment: process.env.NEXT_PUBLIC_ENVIRONMENT || "development",
     release: process.env.NEXT_PUBLIC_RELEASE || "1.0.0",
     context,
-    recentBreadcrumbs: breadcrumbsBuffer.slice(-10),
+    recentBreadcrumbs: typeof window !== "undefined" ? breadcrumbsBuffer.slice(-10) : [],
   });
 }
 

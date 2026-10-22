@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::too_many_arguments)]
 use soroban_sdk::{
     contract, contractimpl, contractmeta, contracttype, symbol_short, token, Address, Env, String,
     Vec,
@@ -77,7 +78,7 @@ impl ScheduleVault {
             release_ledger > env.ledger().sequence(),
             "release_ledger must be in the future"
         );
-        assert!(label.len() != 0, "label cannot be empty");
+        assert!(!label.is_empty(), "label cannot be empty");
         assert!(label.len() <= MAX_LABEL_LEN, "label max 64 chars");
         let mut buf = [0u8; MAX_LABEL_LEN as usize];
         label.copy_into_slice(&mut buf[..label.len() as usize]);
@@ -87,7 +88,10 @@ impl ScheduleVault {
         assert!(!all_ws, "label cannot be blank");
         assert!(label.len() <= 64, "label max 64 chars");
         if let Some(expiry) = expires_after_ledger {
-            assert!(expiry > release_ledger, "expiry must be strictly greater than release_ledger");
+            assert!(
+                expiry > release_ledger,
+                "expiry must be strictly greater than release_ledger"
+            );
         }
 
         let token_client = token::Client::new(&env, &token);
@@ -109,7 +113,7 @@ impl ScheduleVault {
         let vault = VaultEntry {
             id,
             owner: owner.clone(),
-            recipient,
+            recipient: recipient.clone(),
             token,
             amount,
             release_ledger,
@@ -145,12 +149,15 @@ impl ScheduleVault {
             .get(&DataKey::VaultsByRecipient(recipient.clone()))
             .unwrap_or(Vec::new(&env));
         recipient_vaults.push_back(id);
-        env.storage()
-            .persistent()
-            .set(&DataKey::VaultsByRecipient(recipient.clone()), &recipient_vaults);
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::VaultsByRecipient(recipient), 6_312_000, 6_312_000);
+        env.storage().persistent().set(
+            &DataKey::VaultsByRecipient(recipient.clone()),
+            &recipient_vaults,
+        );
+        env.storage().persistent().extend_ttl(
+            &DataKey::VaultsByRecipient(recipient),
+            6_312_000,
+            6_312_000,
+        );
 
         env.storage().instance().extend_ttl(100_000, 100_000);
 
@@ -220,13 +227,15 @@ impl ScheduleVault {
             let vault = VaultEntry {
                 id,
                 owner: owner.clone(),
-                recipient,
+                recipient: recipient.clone(),
                 token: token.clone(),
                 amount,
                 release_ledger,
                 created_ledger,
                 label: label_prefix.clone(),
                 status: VaultStatus::Active,
+                paused_at_ledger: None,
+                expires_after_ledger: None,
             };
 
             env.storage().persistent().set(&DataKey::Vault(id), &vault);
@@ -330,17 +339,26 @@ impl ScheduleVault {
             .persistent()
             .get(&DataKey::VaultsByOwner(vault.owner.clone()))
             .unwrap_or(Vec::new(&env));
-        if let Some(index) = old_owner_vaults.first_index_of(&vault_id) {
+        if let Some(index) = old_owner_vaults.first_index_of(vault_id) {
             old_owner_vaults.remove(index);
-            env.storage()
-                .persistent()
-                .set(&DataKey::VaultsByOwner(vault.owner.clone()), &old_owner_vaults);
+            env.storage().persistent().set(
+                &DataKey::VaultsByOwner(vault.owner.clone()),
+                &old_owner_vaults,
+            );
+            env.storage().persistent().extend_ttl(
+                &DataKey::VaultsByOwner(vault.owner.clone()),
+                6_312_000,
+                6_312_000,
+            );
         }
 
         vault.owner = new_owner.clone();
         env.storage()
             .persistent()
             .set(&DataKey::Vault(vault_id), &vault);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Vault(vault_id), 6_312_000, 6_312_000);
 
         let mut new_owner_vaults: Vec<u64> = env
             .storage()
@@ -348,10 +366,16 @@ impl ScheduleVault {
             .get(&DataKey::VaultsByOwner(new_owner.clone()))
             .unwrap_or(Vec::new(&env));
         new_owner_vaults.push_back(vault_id);
-        env.storage()
-            .persistent()
-            .set(&DataKey::VaultsByOwner(new_owner.clone()), &new_owner_vaults);
-            
+        env.storage().persistent().set(
+            &DataKey::VaultsByOwner(new_owner.clone()),
+            &new_owner_vaults,
+        );
+        env.storage().persistent().extend_ttl(
+            &DataKey::VaultsByOwner(new_owner.clone()),
+            6_312_000,
+            6_312_000,
+        );
+
         env.events()
             .publish((symbol_short!("transfer"), vault_id), new_owner);
     }
@@ -365,14 +389,14 @@ impl ScheduleVault {
 
         vault.owner.require_auth();
         assert!(vault.status == VaultStatus::Active, "vault not active");
-        
+
         vault.status = VaultStatus::Paused;
         vault.paused_at_ledger = Some(env.ledger().sequence());
-        
+
         env.storage()
             .persistent()
             .set(&DataKey::Vault(vault_id), &vault);
-            
+
         env.events()
             .publish((symbol_short!("paused"), vault_id), vault.owner.clone());
     }
@@ -386,14 +410,14 @@ impl ScheduleVault {
 
         vault.owner.require_auth();
         assert!(vault.status == VaultStatus::Paused, "vault not paused");
-        
+
         vault.status = VaultStatus::Active;
         vault.paused_at_ledger = None;
-        
+
         env.storage()
             .persistent()
             .set(&DataKey::Vault(vault_id), &vault);
-            
+
         env.events()
             .publish((symbol_short!("resumed"), vault_id), vault.owner.clone());
     }
@@ -407,7 +431,7 @@ impl ScheduleVault {
 
         vault.owner.require_auth();
         assert!(vault.status == VaultStatus::Active, "vault not active");
-        
+
         let current_ledger = env.ledger().sequence();
         let expiry = vault.expires_after_ledger.expect("vault has no expiry");
         assert!(current_ledger > expiry, "vault not yet expired");
@@ -419,7 +443,7 @@ impl ScheduleVault {
 
         let token_client = token::Client::new(&env, &vault.token);
         token_client.transfer(&env.current_contract_address(), &vault.owner, &vault.amount);
-        
+
         env.events()
             .publish((symbol_short!("reclaimed"), vault_id), vault.owner.clone());
     }
@@ -821,6 +845,7 @@ mod test {
             &1_000_000,
             &2000,
             &String::from_str(&env, "Test vault"),
+            &None,
         );
 
         let events = env.events().all();
@@ -853,6 +878,7 @@ mod test {
             &1_000_000,
             &2000,
             &String::from_str(&env, ""),
+            &None,
         );
     }
 
@@ -868,6 +894,7 @@ mod test {
             &1_000_000,
             &2000,
             &String::from_str(&env, "   "),
+            &None,
         );
     }
 
@@ -880,7 +907,8 @@ mod test {
             &env,
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         );
-        let id = vault_client.create_vault(&owner, &recipient, &token, &1_000_000, &2000, &label);
+        let id =
+            vault_client.create_vault(&owner, &recipient, &token, &1_000_000, &2000, &label, &None);
         assert_eq!(id, 1);
     }
 
@@ -900,6 +928,36 @@ mod test {
                 &env,
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             ),
+            &None,
         );
+    }
+
+    #[test]
+    fn test_transfer_ownership() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let vault_client = ScheduleVaultClient::new(&env, &contract_id);
+
+        let vault_id = vault_client.create_vault(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &2000,
+            &String::from_str(&env, "Test vault"),
+            &None,
+        );
+
+        let new_owner = Address::generate(&env);
+        vault_client.transfer_ownership(&vault_id, &new_owner);
+
+        let old_owner_vaults = vault_client.get_vaults_by_owner(&owner);
+        assert_eq!(old_owner_vaults.len(), 0);
+
+        let new_owner_vaults = vault_client.get_vaults_by_owner(&new_owner);
+        assert_eq!(new_owner_vaults.len(), 1);
+        assert_eq!(new_owner_vaults.get(0).unwrap(), vault_id);
+
+        let vault = vault_client.get_vault(&vault_id).unwrap();
+        assert_eq!(vault.owner, new_owner);
     }
 }

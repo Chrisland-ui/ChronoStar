@@ -1,54 +1,99 @@
 import { describe, it, mock } from 'node:test';
-import assert from 'node:assert';
+import assert from 'node:assert/strict';
 import { SorobanClient } from './soroban-client.js';
+import { describe, it, mock } from "node:test";
+import assert from "node:assert";
+import { Account } from "@stellar/stellar-sdk";
+import { SorobanClient } from "./soroban-client.js";
+import { config } from "./config.js";
 
-describe('SorobanClient', () => {
-  it('builds transaction with memo and returns correlationId and hash', async () => {
+const TEST_CONTRACT = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
+const TEST_ACCOUNT = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+describe("SorobanClient", () => {
+  it("builds transaction with memo and returns correlationId and hash", async () => {
     const client = new SorobanClient();
-    client.sourceAccount = { sequence: '1' };
+    client.sourceAccount = new Account(TEST_ACCOUNT, "1");
     client.sourceKeypair = {
-      publicKey: () => 'G...',
+      publicKey: () => TEST_ACCOUNT,
       sign: () => {},
     };
 
     client.server = {
+      getAccount: mock.fn(async () => new Account(TEST_ACCOUNT, "1")),
       simulateTransaction: mock.fn(async () => ({
         result: { retval: null },
+        transactionData: {},
       })),
       sendTransaction: mock.fn(async () => ({
-        status: 'SUCCESS',
-        hash: 'txhash1234567890',
+        status: "SUCCESS",
+        hash: "txhash1234567890",
       })),
     };
 
     const result = await client.invokeContract('C123', 'test_method', [], 'test-correlation-id-12345');
     assert.strictEqual(result.hash, 'txhash1234567890');
     assert.strictEqual(result.correlationId, 'test-correlation-id-12345');
-import { describe, it, expect, vi } from 'vitest';
-import { SorobanClient } from './soroban-client.js';
+  });
 
-describe('SorobanClient', () => {
   it('refreshes source account sequence on submission failure', async () => {
+    client._assemble = mock.fn(() => ({
+      sign: () => {},
+    }));
+
+    const result = await client.invokeContract(
+      TEST_CONTRACT,
+      "test_method",
+      [],
+      "test-correlation-id-12345",
+    );
+    assert.strictEqual(result.hash, "txhash1234567890");
+    assert.strictEqual(result.correlationId, "test-correlation-id-12345");
+    assert.strictEqual(client._assemble.mock.callCount(), 1);
+  });
+
+  it("refreshes source account sequence on submission failure", async () => {
     const client = new SorobanClient();
     let getAccountCalls = 0;
 
+    const originalAttempts = config.retryMaxAttempts;
+    const originalDelay = config.retryBaseDelayMs;
+    config.retryMaxAttempts = 1;
+    config.retryBaseDelayMs = 0;
+
     client.sourceKeypair = {
       publicKey: () => 'GBANKKEY1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234',
-      sign: vi.fn(),
+      publicKey: () => TEST_ACCOUNT,
+      sign: mock.fn(),
     };
 
     client.server = {
-      getAccount: vi.fn(async () => {
+      getAccount: mock.fn(async () => {
         getAccountCalls++;
-        return { sequenceNumber: () => String(100 + getAccountCalls), sequence: String(100 + getAccountCalls) };
+        return new Account(TEST_ACCOUNT, String(100 + getAccountCalls));
       }),
-      simulateTransaction: vi.fn(async () => ({ error: 'sim_error' })),
+      simulateTransaction: mock.fn(async () => ({ error: 'sim_error' })),
+      simulateTransaction: mock.fn(async () => ({ error: "sim_error" })),
     };
 
-    client.sourceAccount = { sequenceNumber: () => '100', sequence: '100' };
+    client.sourceAccount = new Account(TEST_ACCOUNT, "100");
 
-    await expect(client.invokeContract('C123', 'test_method', [])).rejects.toThrow('test_method simulation failed: sim_error');
-    expect(client.server.getAccount).toHaveBeenCalled();
-    expect(getAccountCalls).toBeGreaterThan(0);
+    await assert.rejects(
+      async () => {
+        await client.invokeContract('C123', 'test_method', []);
+      },
+      /test_method simulation failed: sim_error/
+    );
+    assert.strictEqual(getAccountCalls > 0, true);
+    try {
+      await assert.rejects(
+        () => client.invokeContract(TEST_CONTRACT, "test_method", []),
+        /test_method simulation failed: sim_error/,
+      );
+      assert.ok(getAccountCalls > 0);
+    } finally {
+      config.retryMaxAttempts = originalAttempts;
+      config.retryBaseDelayMs = originalDelay;
+    }
   });
 });

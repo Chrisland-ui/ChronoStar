@@ -1,3 +1,57 @@
+export type VaultStatusName = "Active" | "Released" | "Cancelled" | "Paused" | "Reclaimed";
+export type VaultStatusOrdinal = 0 | 1 | 2 | 3 | 4;
+export type VaultStatus = VaultStatusName | VaultStatusOrdinal;
+
+export type StreamStatusName = "Active" | "Paused" | "Completed" | "Cancelled";
+export type StreamStatusOrdinal = 0 | 1 | 2 | 3;
+export type StreamStatus = StreamStatusName | StreamStatusOrdinal;
+
+export type DCAStatusName = "Active" | "Exhausted" | "Cancelled";
+export type DCAStatusOrdinal = 0 | 1 | 2;
+export type DCAStatus = DCAStatusName | DCAStatusOrdinal;
+
+export const VAULT_STATUS_NAMES: Record<VaultStatusOrdinal, VaultStatusName> = {
+  0: "Active",
+  1: "Released",
+  2: "Cancelled",
+  3: "Paused",
+  4: "Reclaimed",
+};
+
+export const STREAM_STATUS_NAMES: Record<StreamStatusOrdinal, StreamStatusName> = {
+  0: "Active",
+  1: "Paused",
+  2: "Completed",
+  3: "Cancelled",
+};
+
+export const DCA_STATUS_NAMES: Record<DCAStatusOrdinal, DCAStatusName> = {
+  0: "Active",
+  1: "Exhausted",
+  2: "Cancelled",
+};
+
+export function formatVaultStatus(status: VaultStatus): VaultStatusName {
+  if (typeof status === "number") {
+    return VAULT_STATUS_NAMES[status as VaultStatusOrdinal] || "Active";
+  }
+  return status;
+}
+
+export function formatStreamStatus(status: StreamStatus): StreamStatusName {
+  if (typeof status === "number") {
+    return STREAM_STATUS_NAMES[status as StreamStatusOrdinal] || "Active";
+  }
+  return status;
+}
+
+export function formatDCAStatus(status: DCAStatus): DCAStatusName {
+  if (typeof status === "number") {
+    return DCA_STATUS_NAMES[status as DCAStatusOrdinal] || "Active";
+  }
+  return status;
+}
+
 export interface VaultEntry {
   id: number;
   owner: string;
@@ -7,7 +61,9 @@ export interface VaultEntry {
   release_ledger: number;
   created_ledger: number;
   label: string;
-  status: 'Active' | 'Released' | 'Cancelled';
+  status: VaultStatus;
+  paused_at_ledger?: number | null;
+  expires_after_ledger?: number | null;
 }
 
 export interface StreamEntry {
@@ -20,8 +76,12 @@ export interface StreamEntry {
   start_ledger: number;
   end_ledger: number;
   last_claimed_ledger: number;
+  created_ledger?: number;
   label: string;
-  status: 'Active' | 'Completed' | 'Cancelled';
+  grace_period_ledgers?: number;
+  status: StreamStatus;
+  paused_at_ledger?: number;
+  paused_ledgers?: number;
   claimable_amount?: string;
 }
 
@@ -29,16 +89,21 @@ export interface DCAEntry {
   id: number;
   owner: string;
   token_in: string;
+  token_out?: string | null;
+  router?: string | null;
   swap_receiver: string;
   total_budget: string;
   remaining_budget: string;
   amount_per_swap: string;
+  min_output_per_swap?: string | bigint;
+  last_swap_output?: string | bigint;
   interval_ledgers: number;
   last_executed_ledger: number;
   next_execution_ledger: number;
   executions_completed: number;
+  created_ledger?: number;
   label: string;
-  status: 'Active' | 'Exhausted' | 'Cancelled';
+  status: DCAStatus;
 }
 
 export interface DCAExecution {
@@ -60,15 +125,15 @@ export interface DCAExecutionHistory {
 }
 
 export interface ScheduleEvent {
-  type: 'vault' | 'stream' | 'dca';
+  type: "vault" | "stream" | "dca";
   id: number;
   targetLedger: number;
   remainingLedgers: number;
 }
 
 export interface Stats {
-  vaults: { total: number; active: number; released: number };
-  streams: { total: number; active: number; completed: number };
+  vaults: { total: number; active: number; released: number; paused?: number; reclaimed?: number };
+  streams: { total: number; active: number; completed: number; paused?: number };
   dca: { total: number; active: number; exhausted: number };
   totalValueLocked: string;
 }

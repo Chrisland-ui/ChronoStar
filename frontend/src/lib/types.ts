@@ -1,5 +1,7 @@
-export type { VaultEntry, StreamEntry, DCAEntry, ScheduleEvent, Stats } from '@/types';
-export type ContractEntry = VaultEntry | StreamEntry | DCAEntry;
+export * from "@/types";
+
+export type ContractEntry =
+  import("@/types").VaultEntry | import("@/types").StreamEntry | import("@/types").DCAEntry;
 
 export const isContractEntry = (v: unknown): v is ContractEntry =>
-  typeof v === 'object' && v !== null && 'id' in v && 'status' in v;
+  typeof v === "object" && v !== null && "id" in v && "status" in v;

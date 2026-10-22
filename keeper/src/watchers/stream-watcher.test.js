@@ -1,6 +1,6 @@
-import { describe, it, mock } from 'node:test';
-import assert from 'node:assert';
-import { StreamWatcher } from './stream-watcher.js';
+import { describe, it, mock } from "node:test";
+import assert from "node:assert";
+import { StreamWatcher } from "./stream-watcher.js";
 
 function mockReadContract(responses) {
   let i = 0;
@@ -12,37 +12,29 @@ function mockLogger() {
   return { child: mock.fn(() => child), info: mock.fn(), error: mock.fn() };
 }
 
-describe('StreamWatcher', () => {
-  it('ticks a completed stream', async () => {
+describe("StreamWatcher", () => {
+  it("ticks a completed stream", async () => {
     const invokeContract = mock.fn();
     const client = {
-      readContract: mockReadContract([
-        1,
-        200,
-        [{ status: ['Active'], end_ledger: 100 }],
-      ]),
+      readContract: mockReadContract([1, 200, [{ status: ["Active"], end_ledger: 100 }]]),
       invokeContract,
     };
 
-    const watcher = new StreamWatcher(client, 'C...');
+    const watcher = new StreamWatcher(client, "C...");
     await watcher.poll();
 
     assert.strictEqual(invokeContract.mock.callCount(), 1);
-    assert.strictEqual(invokeContract.mock.calls[0].arguments[1], 'tick');
+    assert.strictEqual(invokeContract.mock.calls[0].arguments[1], "tick");
   });
 
-  it('attaches a correlation ID to all log entries in a poll cycle', async () => {
+  it("attaches a correlation ID to all log entries in a poll cycle", async () => {
     const client = {
-      readContract: mockReadContract([
-        1,
-        200,
-        [{ status: ['Active'], end_ledger: 100 }],
-      ]),
+      readContract: mockReadContract([1, 200, [{ status: ["Active"], end_ledger: 100 }]]),
       invokeContract: mock.fn(),
     };
     const parent = mockLogger();
 
-    const watcher = new StreamWatcher(client, 'C...', parent);
+    const watcher = new StreamWatcher(client, "C...", parent);
     await watcher.poll();
 
     assert.strictEqual(parent.child.mock.callCount(), 1);
@@ -54,18 +46,14 @@ describe('StreamWatcher', () => {
     assert.strictEqual(cycleLogger.error.mock.callCount(), 0);
   });
 
-  it('generates a unique correlation ID per poll cycle', async () => {
+  it("generates a unique correlation ID per poll cycle", async () => {
     const client = {
-      readContract: mockReadContract([
-        1,
-        200,
-        [{ status: ['Active'], end_ledger: 100 }],
-      ]),
+      readContract: mockReadContract([1, 200, [{ status: ["Active"], end_ledger: 100 }]]),
       invokeContract: mock.fn(),
     };
     const parent = mockLogger();
 
-    const watcher = new StreamWatcher(client, 'C...', parent);
+    const watcher = new StreamWatcher(client, "C...", parent);
     await watcher.poll();
     await watcher.poll();
 
@@ -75,48 +63,53 @@ describe('StreamWatcher', () => {
     assert.notStrictEqual(first, second);
   });
 
-  it('skips non-completed streams', async () => {
+  it("skips non-completed streams", async () => {
     const invokeContract = mock.fn();
     const client = {
-      readContract: mockReadContract([
-        1,
-        200,
-        [{ status: ['Active'], end_ledger: 300 }],
-      ]),
+      readContract: mockReadContract([1, 200, [{ status: ["Active"], end_ledger: 300 }]]),
       invokeContract,
     };
 
-    const watcher = new StreamWatcher(client, 'C...');
+    const watcher = new StreamWatcher(client, "C...");
     await watcher.poll();
 
     assert.strictEqual(invokeContract.mock.callCount(), 0);
   });
 
-  it('reads current_ledger once when polling multiple streams', async () => {
+  it("reads current_ledger once when polling multiple streams", async () => {
+    const invokeContract = mock.fn();
     const client = {
       readContract: mockReadContract([
         2,
         200,
-        [{ status: ['Active'], end_ledger: 100 }],
-        [{ status: ['Active'], end_ledger: 300 }],
-      ]),
-      invokeContract: mock.fn(),
-  it('skips paused streams', async () => {
-    const invokeContract = mock.fn();
-    const client = {
-      readContract: mockReadContract([
-        1,
-        [{ status: ['Paused'], end_ledger: 100 }],
-        200,
+        [{ status: ["Active"], end_ledger: 100 }],
+        [{ status: ["Active"], end_ledger: 300 }],
       ]),
       invokeContract,
     };
 
-    const watcher = new StreamWatcher(client, 'C...');
+    const watcher = new StreamWatcher(client, "C...");
     await watcher.poll();
 
     const ledgerCalls = client.readContract.mock.calls.filter(
-      ({ arguments: args }) => args[1] === 'current_ledger',
+      ({ arguments: args }) => args[1] === "current_ledger",
+    );
+    assert.strictEqual(ledgerCalls.length, 1);
+    assert.strictEqual(invokeContract.mock.callCount(), 1);
+  });
+
+  it("skips paused streams", async () => {
+    const invokeContract = mock.fn();
+    const client = {
+      readContract: mockReadContract([1, 200, [{ status: ["Paused"], end_ledger: 100 }]]),
+      invokeContract,
+    };
+
+    const watcher = new StreamWatcher(client, "C...");
+    await watcher.poll();
+
+    const ledgerCalls = client.readContract.mock.calls.filter(
+      ({ arguments: args }) => args[1] === "current_ledger",
     );
     assert.strictEqual(ledgerCalls.length, 1);
     assert.strictEqual(invokeContract.mock.callCount(), 0);

@@ -71,10 +71,4 @@ npm run dev
 
 Visit `http://localhost:3000` and connect your Freighter wallet.
 
-## 6. Create a Schedule
 
-1. Connect your wallet
-2. Navigate to **Dashboard**
-3. Click **New Vault** (or Stream / DCA)
-4. Fill in the form and submit
-5. Watch the keeper execute when the time comes

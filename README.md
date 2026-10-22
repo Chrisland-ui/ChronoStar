@@ -11,20 +11,20 @@ Time-based payment primitives for the Stellar ecosystem: time-locked vaults, rec
 
 ## Deployed Contracts (Testnet)
 
-| Contract | Address |
-|----------|---------|
-| Schedule Vault | `CAAD4GP5VBJTL3AWKJCQSIMZ4ZDSOTDN6AAUQONOSI6QYGLFYYSHEP3T` |
+| Contract         | Address                                                    |
+| ---------------- | ---------------------------------------------------------- |
+| Schedule Vault   | `CAAD4GP5VBJTL3AWKJCQSIMZ4ZDSOTDN6AAUQONOSI6QYGLFYYSHEP3T` |
 | Recurring Stream | `CDFKO7H2VAPXZFQN6OF5KSJQXG7CO2JAGV5ZPQTQSYMT4Y6QLFG7A2FG` |
-| DCA Policy | `CDFOXEG73Y47FWTVOT7I34RECW32LX6Y7H5VYU6NXWHFQ4BK52ELB7EM` |
+| DCA Policy       | `CDFOXEG73Y47FWTVOT7I34RECW32LX6Y7H5VYU6NXWHFQ4BK52ELB7EM` |
 
 ## Deployed Services
 
-| Service | URL |
-|---------|-----|
-| Frontend | https://chrono-star.vercel.app |
-| Backend API | https://chronostar-backend-s905.onrender.com |
-| Documentation | https://chronostar-protocol.github.io/ChronoStar |
-| Keeper Bot | https://chronostar-keeper.onrender.com |
+| Service       | URL                                                   |
+| ------------- | ----------------------------------------------------- |
+| Frontend      | https://chrono-star.vercel.app                        |
+| Backend API   | https://chronostar-backend-s905.onrender.com          |
+| Documentation | https://chronostar-protocol.github.io/ChronoStar      |
+| Keeper Bot    | Private service (monitored via internal health check) |
 
 ## Architecture
 
@@ -108,17 +108,17 @@ Base URL: `https://chronostar-backend-s905.onrender.com`
 
 A machine-readable OpenAPI 3.0.3 specification is available at [`backend/openapi.yaml`](./backend/openapi.yaml).
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /healthz` | Health check |
-| `GET /api/docs` | Interactive Swagger UI documentation |
-| `GET /api/openapi.json` | OpenAPI 3.0.3 specification JSON |
-| `GET /api/stream` | Server-Sent Events stream for live schedule updates |
-| `GET /api/stats` | Aggregated stats across all contracts |
-| `GET /api/events` | Upcoming executable events |
-| `GET /api/schedules/:address` | Vaults for an address |
-| `GET /api/streams/:address` | Streams for an address |
-| `GET /api/dca/:address` | DCA policies for an address |
+| Endpoint                      | Description                                         |
+| ----------------------------- | --------------------------------------------------- |
+| `GET /healthz`                | Health check                                        |
+| `GET /api/docs`               | Interactive Swagger UI documentation                |
+| `GET /api/openapi.json`       | OpenAPI 3.0.3 specification JSON                    |
+| `GET /api/stream`             | Server-Sent Events stream for live schedule updates |
+| `GET /api/stats`              | Aggregated stats across all contracts               |
+| `GET /api/events`             | Upcoming executable events                          |
+| `GET /api/schedules/:address` | Vaults for an address                               |
+| `GET /api/streams/:address`   | Streams for an address                              |
+| `GET /api/dca/:address`       | DCA policies for an address                         |
 
 ## Tech Stack
 
