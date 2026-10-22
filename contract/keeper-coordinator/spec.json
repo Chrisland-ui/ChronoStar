@@ -1,0 +1,75 @@
+{
+  "contract": "keeper-coordinator",
+  "source": "generated with scripts/generate-contract-specs.sh",
+  "metadata": {
+    "name": "ChronoStar Keeper Coordinator",
+    "version": "0.1.0",
+    "description": "Exclusive claim ledger that stops two keepers executing the same schedule"
+  },
+  "types": {
+    "Claim": {
+      "fields": {
+        "keeper": "Address",
+        "expires_at": "u32"
+      }
+    }
+  },
+  "functions": [
+    {
+      "name": "register",
+      "inputs": [
+        { "name": "keeper", "type": "Address" }
+      ],
+      "outputs": []
+    },
+    {
+      "name": "unregister",
+      "inputs": [
+        { "name": "keeper", "type": "Address" }
+      ],
+      "outputs": []
+    },
+    {
+      "name": "is_registered",
+      "inputs": [
+        { "name": "keeper", "type": "Address" }
+      ],
+      "outputs": [
+        { "type": "bool" }
+      ]
+    },
+    {
+      "name": "claim",
+      "inputs": [
+        { "name": "resource", "type": "Symbol" },
+        { "name": "id", "type": "u64" },
+        { "name": "keeper", "type": "Address" },
+        { "name": "ttl_ledgers", "type": "u32" }
+      ],
+      "outputs": [
+        { "type": "bool" }
+      ]
+    },
+    {
+      "name": "release",
+      "inputs": [
+        { "name": "resource", "type": "Symbol" },
+        { "name": "id", "type": "u64" },
+        { "name": "keeper", "type": "Address" }
+      ],
+      "outputs": [
+        { "type": "bool" }
+      ]
+    },
+    {
+      "name": "get_claim",
+      "inputs": [
+        { "name": "resource", "type": "Symbol" },
+        { "name": "id", "type": "u64" }
+      ],
+      "outputs": [
+        { "type": "Option<Claim>" }
+      ]
+    }
+  ]
+}
