@@ -5,6 +5,24 @@ info:
     REST API for reading on-chain state from the ChronoStar protocol —
     time-based payment primitives (scheduled vaults, recurring streams,
     and DCA policies) on the Stellar network.
+
+    ## Rate limits
+
+    Every request counts against a global limit of 500 requests per 15
+    minutes. `/api/schedules`, `/api/streams` and `/api/dca` also have a limit
+    of 100 requests per 15 minutes, and `/api/events` a limit of 50 per 15
+    minutes. All limits use the same standard headers, sent on every response:
+
+    | Header | Meaning |
+    | --- | --- |
+    | `RateLimit-Limit` | Requests allowed in the current window. |
+    | `RateLimit-Remaining` | Requests left in the current window. |
+    | `RateLimit-Reset` | Seconds until the window resets. |
+    | `RateLimit-Policy` | The limit and window length, e.g. `100;w=900`. |
+
+    When a limit is exceeded the API answers `429` with the same headers and a
+    `Retry-After` header. Clients should wait for `Retry-After` seconds, or
+    slow down once `RateLimit-Remaining` approaches 0.
   version: 1.0.0
   contact:
     name: ChronoStar Protocol
@@ -198,12 +216,14 @@ components:
       in: path
       required: true
       description: >
-        Stellar public key (G-starting, 56 characters).
+        Stellar address: an account public key (G...), a contract address
+        (C...) or a muxed account (M...). A muxed account is looked up by the
+        account it belongs to.
       schema:
         type: string
-        pattern: "^G[A-Z0-9]{55}$"
+        pattern: "^[GCM][A-Z2-7]{55,68}$"
         minLength: 56
-        maxLength: 56
+        maxLength: 69
       example: GBXGQJYF4VCR6J7QCRDMYNCHTSONGZXYQHG7OFNZFLZJGXA7ZUGA7AJE
 
   schemas:
@@ -541,6 +561,24 @@ components:
           description: Human-readable error message.
           example: "Invalid Stellar address. Must be a G-starting 56-character public key."
 
+  headers:
+    RateLimitLimit:
+      description: Requests allowed in the current window.
+      schema:
+        type: integer
+    RateLimitRemaining:
+      description: Requests left in the current window.
+      schema:
+        type: integer
+    RateLimitReset:
+      description: Seconds until the current window resets.
+      schema:
+        type: integer
+    RetryAfter:
+      description: Seconds to wait before retrying (only on 429 responses).
+      schema:
+        type: integer
+
   responses:
     BadAddress:
       description: Invalid Stellar address format.
@@ -549,10 +587,19 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
           example:
-            error: "Invalid Stellar address. Must be a G-starting 56-character public key."
+            error: "Invalid Stellar address. Expected an account (G...), contract (C...) or muxed account (M...) address."
 
     RateLimited:
       description: Global rate limit exceeded.
+      headers:
+        RateLimit-Limit:
+          $ref: "#/components/headers/RateLimitLimit"
+        RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimitRemaining"
+        RateLimit-Reset:
+          $ref: "#/components/headers/RateLimitReset"
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
       content:
         application/json:
           schema:
@@ -562,6 +609,15 @@ components:
 
     RateLimitedAddress:
       description: Per-address rate limit exceeded.
+      headers:
+        RateLimit-Limit:
+          $ref: "#/components/headers/RateLimitLimit"
+        RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimitRemaining"
+        RateLimit-Reset:
+          $ref: "#/components/headers/RateLimitReset"
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
       content:
         application/json:
           schema:

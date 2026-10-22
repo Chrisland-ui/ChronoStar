@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { ConnectButton } from './ConnectButton';
-import { LedgerClock } from './LedgerClock';
+import { CurrentLedger } from './CurrentLedger';
 
 export function Navbar() {
   return (
@@ -16,7 +16,7 @@ export function Navbar() {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <LedgerClock />
+          <CurrentLedger />
           <ConnectButton />
         </div>
       </div>

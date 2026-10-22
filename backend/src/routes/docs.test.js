@@ -29,6 +29,19 @@ describe('Docs Router', () => {
     assert.strictEqual(res.text.includes('SwaggerUIBundle'), true);
   });
 
+  it('documents the rate limits and the headers they emit', async () => {
+    const app = express();
+    app.use('/api', createDocsRouter(openapiPath));
+
+    const res = await request(app).get('/api/openapi.json');
+    assert.match(res.body.info.description, /Rate limits/);
+    for (const header of ['RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset', 'Retry-After']) {
+      assert.ok(res.body.info.description.includes(header), header);
+    }
+    for (const response of ['RateLimited', 'RateLimitedAddress']) {
+      const headers = Object.keys(res.body.components.responses[response].headers);
+      assert.deepStrictEqual(headers.sort(), ['RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset', 'Retry-After']);
+    }
   it('uses the trusted forwarded HTTPS origin', async () => {
     const app = express();
     app.set('trust proxy', 1);

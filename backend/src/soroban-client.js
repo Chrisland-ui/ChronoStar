@@ -5,6 +5,7 @@ import {
   Address,
   Keypair,
   Account,
+  MuxedAccount,
   TransactionBuilder,
   scValToNative,
 } from "@stellar/stellar-sdk";
@@ -62,7 +63,12 @@ export class SorobanClient {
     return xdr.ScVal.scvU32(Number(val));
   }
   scvAddress(addr) {
-    return Address.fromString(addr).toScVal();
+    // Contracts only know account and contract addresses, so a muxed account
+    // (M...) is looked up by the account it belongs to.
+    const resolved = addr.startsWith("M")
+      ? MuxedAccount.fromAddress(addr, "0").baseAccount().accountId()
+      : addr;
+    return Address.fromString(resolved).toScVal();
   }
 }
 
