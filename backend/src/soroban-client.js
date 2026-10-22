@@ -46,6 +46,10 @@ export class SorobanClient {
   scvU32(val) {
     return xdr.ScVal.scvU32(Number(val));
   }
+  /** Encodes a list of ids as a Soroban `Vec<u64>`. */
+  scvVecU64(values) {
+    return xdr.ScVal.scvVec(values.map((v) => xdr.ScVal.scvU64(BigInt(v))));
+  }
   scvAddress(addr) {
     return Address.fromString(addr).toScVal();
   }

@@ -36,4 +36,4 @@ Without `COORDINATOR_CONTRACT_ID`, watchers retain their current behavior. The l
 
 ## Compatibility and rollout
 
-Deploy and initialize the coordinator, register each keeper address, then set the two coordinator environment variables on participating keeper instances. Mixed coordinated and uncoordinated keepers are unsafe; all keepers targeting the same schedules must opt in during the rollout.
+Deploy and initialize the coordinator, then set the two coordinator environment variables on participating keeper instances. Each keeper registers its own address with the coordinator at startup, before its watchers begin polling; an already-registered keeper is left as is, and a failed registration is logged as a warning. On a clean shutdown the keeper unregisters itself so another keeper can take over without waiting for the claim TTL. Mixed coordinated and uncoordinated keepers are unsafe; all keepers targeting the same schedules must opt in during the rollout.

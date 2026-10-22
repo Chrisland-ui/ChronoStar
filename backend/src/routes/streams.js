@@ -4,7 +4,7 @@ import { validateStellarAddress, addressRouteLimiter } from '../middleware.js';
 export function createStreamsRouter(client, contractId) {
   const router = Router();
 
-    router.get('/:address', addressRouteLimiter, validateStellarAddress, async (req, res, next) => {
+  router.get('/:address', addressRouteLimiter, validateStellarAddress, async (req, res, next) => {
     try {
       const address = req.params.address;
       const [asOwner, asRecipient] = await Promise.all([
@@ -17,8 +17,9 @@ export function createStreamsRouter(client, contractId) {
         return res.json([]);
       }
 
-      const scvIds = client.nativeToScv(ids, { type: 'vec', inner: 'u64' });
-      
+      // get_claimables takes Vec<u64>; the ids must be encoded as u64, not inferred.
+      const scvIds = client.scvVecU64(ids);
+
       const [streams, claimables] = await Promise.all([
         Promise.all(ids.map(id => client.readContract(contractId, 'get_stream', [client.scvU64(id)]))),
         client.readContract(contractId, 'get_claimables', [scvIds]),
@@ -27,7 +28,7 @@ export function createStreamsRouter(client, contractId) {
       res.json(streams.map((s, i) => ({ 
         id: ids[i], 
         ...s,
-        claimable_amount: claimables[i] !== undefined ? claimables[i].toString() : '0'
+        claimable_amount: claimables?.[i] !== undefined && claimables[i] !== null ? claimables[i].toString() : '0'
       })));
     } catch (err) {
       next(err);
