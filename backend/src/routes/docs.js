@@ -3,7 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
 
-export function createDocsRouter(openapiPath = path.join(process.cwd(), 'openapi.yaml')) {
+export function createDocsRouter(
+  openapiPath = path.join(process.cwd(), 'openapi.yaml'),
+  publicBaseUrl = '',
+) {
   const router = Router();
 
   router.get('/openapi.json', (req, res, next) => {
@@ -11,10 +14,12 @@ export function createDocsRouter(openapiPath = path.join(process.cwd(), 'openapi
       const fileContent = fs.readFileSync(openapiPath, 'utf8');
       const doc = yaml.load(fileContent);
 
+      const forwardedHost = req.get('x-forwarded-host')?.split(',')[0].trim();
       const protocol = req.protocol || 'http';
-      const host = req.get('host') || 'localhost:3001';
+      const host = forwardedHost || req.get('host') || 'localhost:3001';
+      const externalUrl = publicBaseUrl || `${protocol}://${host}`;
       doc.servers = [
-        { url: `${protocol}://${host}`, description: 'Current environment' },
+        { url: externalUrl, description: 'Current environment' },
         ...(doc.servers || []),
       ];
 
