@@ -150,7 +150,9 @@ export async function buildAndSignContractTx(
 
   const networkPassphrase = options?.networkPassphrase || getNetworkPassphrase();
   const rpcUrl = options?.rpcUrl || config.rpcUrl;
-  const signer = options?.signer || signTransaction;
+  // freighter's signTransaction takes the XDR string; the injectable signer takes an object.
+  const signer = (options?.signer || signTransaction) as NonNullable<typeof options>["signer"] &
+    ((args: { xdr: string; networkPassphrase?: string }) => Promise<string | null>);
 
   // Build operation with Contract helper
   const contract = new Contract(contractId);
@@ -209,7 +211,7 @@ export async function buildAndSignContractTx(
   } else if (options?.server) {
     const signedTx = new Transaction(signedXdr, networkPassphrase);
     const sendRes = await options.server.sendTransaction(signedTx);
-    if (sendRes.errorResultXdr || sendRes.status === "ERROR") {
+    if (sendRes.errorResult || sendRes.status === "ERROR") {
       throw new Error(`Transaction submission error: ${sendRes.status}`);
     }
     txHash = sendRes.hash || signedTx.hash().toString("hex");

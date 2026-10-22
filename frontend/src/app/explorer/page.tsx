@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { LedgerClock } from '@/components/LedgerClock';
 import { ledgersToHuman } from '@/lib/utils';
+import { ExplorerSkeleton } from '@/components/Skeleton';
 import type { ScheduleEvent } from '@/types';
 
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {

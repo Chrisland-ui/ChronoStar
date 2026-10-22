@@ -19,6 +19,8 @@ export class StreamConsumer {
   private listeners: Set<StreamCallback> = new Set();
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private reconnectDelay = 2000;
+  /** Id of the last event received, sent back on reconnect so the server can resume. */
+  private lastEventId: string | null = null;
 
   constructor(url = '/api/stream') {
     this.url = url;
@@ -28,11 +30,12 @@ export class StreamConsumer {
     if (typeof window === 'undefined' || this.eventSource) return;
 
     try {
-      this.eventSource = new EventSource(this.url);
+      this.eventSource = new EventSource(this.resumeUrl());
 
       this.eventSource.addEventListener('schedule-update', (event: MessageEvent) => {
         try {
           const parsed = JSON.parse(event.data) as StreamUpdateData;
+          if (event.lastEventId) this.lastEventId = event.lastEventId;
           this.notify(parsed);
         } catch (err) {
           console.error('Failed to parse SSE event data', err);
@@ -47,6 +50,17 @@ export class StreamConsumer {
       console.error('Failed to initialize EventSource', err);
       this.scheduleReconnect();
     }
+  }
+
+  /**
+   * `EventSource` only sends `Last-Event-ID` on its own automatic retries, and this
+   * consumer creates a fresh connection after an error, so pass the id as a query
+   * parameter the server also understands.
+   */
+  private resumeUrl(): string {
+    if (this.lastEventId === null) return this.url;
+    const separator = this.url.includes('?') ? '&' : '?';
+    return `${this.url}${separator}lastEventId=${encodeURIComponent(this.lastEventId)}`;
   }
 
   public disconnect(): void {

@@ -110,7 +110,7 @@ export default function StreamDetailPage() {
   );
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function DetailRow({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="flex justify-between">
       <span className="text-sm text-text-muted">{label}</span>

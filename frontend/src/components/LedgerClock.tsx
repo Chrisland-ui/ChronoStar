@@ -4,18 +4,20 @@ import { useState, useEffect } from "react";
 import { SECONDS_PER_LEDGER } from "@/lib/network";
 
 interface LedgerClockProps {
-  targetLedger?: number;
-  currentLedger?: number;
+  /** Ledger the countdown runs to. */
+  targetLedger: number;
+  /** The network's current ledger. Required: a guessed value gives a wrong countdown. */
+  currentLedger: number;
   secondsPerLedger?: number;
   className?: string;
 }
 
 export function LedgerClock({
-  targetLedger = 2000,
-  currentLedger = 1000,
+  targetLedger,
+  currentLedger,
   secondsPerLedger = SECONDS_PER_LEDGER,
   className = "",
-}: LedgerClockProps = {}) {
+}: LedgerClockProps) {
   const [now, setNow] = useState<Date>(() => new Date());
 
   useEffect(() => {
