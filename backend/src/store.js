@@ -24,12 +24,14 @@ export class BaseEventStore {
  * File-backed JSON EventStore driver.
  */
 export class FileEventStore extends BaseEventStore {
-  constructor(filePath = DEFAULT_PATH, maxEvents = 10_000) {
+  constructor(filePath = DEFAULT_PATH, maxEvents = 10_000, log = console) {
     super();
     this.filePath = filePath;
     this.maxEvents = maxEvents;
     this.events = null;
     this.writeQueue = Promise.resolve();
+    this.lastWriteError = null;
+    this.log = log;
   }
 
   async load() {
@@ -54,14 +56,32 @@ export class FileEventStore extends BaseEventStore {
       .filter((event) => !known.has(event.key));
     if (!additions.length) return current;
     this.events = [...current, ...additions].slice(-this.maxEvents);
-    this.writeQueue = this.writeQueue.then(async () => {
+    const write = this.writeQueue.then(async () => {
       await mkdir(dirname(this.filePath), { recursive: true });
       const temporaryPath = `${this.filePath}.tmp`;
       await writeFile(temporaryPath, JSON.stringify(this.events, null, 2));
       await rename(temporaryPath, this.filePath);
     });
-    await this.writeQueue;
+    // Keep the shared queue fulfilled after a failure so one transient disk
+    // error cannot poison every later append. The individual caller still
+    // receives the original rejection.
+    this.writeQueue = write.catch(() => undefined);
+    try {
+      await write;
+      this.lastWriteError = null;
+    } catch (error) {
+      this.lastWriteError = error;
+      this.log.error?.({ err: error }, 'event store write failed');
+      throw error;
+    }
     return this.events;
+  }
+
+  getWriteStatus() {
+    return {
+      healthy: this.lastWriteError === null,
+      lastError: this.lastWriteError?.message ?? null,
+    };
   }
 
   async list(limit = 50) {
@@ -173,6 +193,6 @@ export function createEventStore(driver = process.env.EVENT_STORE_DRIVER || 'fil
       return new SQLiteEventStore(options);
     case 'file':
     default:
-      return new FileEventStore(options.filePath, options.maxEvents);
+      return new FileEventStore(options.filePath, options.maxEvents, options.log);
   }
 }
