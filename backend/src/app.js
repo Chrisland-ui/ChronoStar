@@ -3,6 +3,7 @@ import cors from 'cors';
 import pinoHttp from 'pino-http';
 import { logger } from './logger.js';
 import { genReqId, globalLimiter } from './middleware.js';
+import { ErrorCode, createErrorHandler, notFoundHandler } from './errors.js';
 import { createSchedulesRouter } from './routes/schedules.js';
 import { createStreamsRouter, createDCARouter } from './routes/streams.js';
 import { createEventsRouter } from './routes/events.js';
@@ -13,7 +14,13 @@ import { EventStore } from './store.js';
 import { createEventStore } from './store.js';
 import { config } from './config.js';
 
-export function createApp(clients, log = logger, store = createEventStore()) {
+/**
+ * @param {object} [options]
+ * @param {string[]} [options.configProblems] Configuration problems found at startup; when
+ *   non-empty, `/healthz` reports 503 instead of a healthy status.
+ */
+export function createApp(clients, log = logger, store = createEventStore(), options = {}) {
+  const configProblems = options.configProblems ?? [];
   const app = express();
 
   app.set('trust proxy', config.trustProxy);
@@ -34,6 +41,15 @@ export function createApp(clients, log = logger, store = createEventStore()) {
   app.use('/api/events', createEventsRouter(clients, log, store));
   app.use('/api/stats', createStatsRouter(clients));
 
+  app.get('/healthz', (_req, res) => {
+    if (configProblems.length > 0) {
+      return res.status(503).json({
+        status: 'error',
+        code: ErrorCode.INVALID_CONFIG,
+        problems: configProblems,
+      });
+    }
+    return res.json({ status: 'ok' });
   app.get('/healthz', (_req, res) => res.json({ status: 'ok' }));
 
   app.use((err, _req, res, _next) => {
@@ -41,6 +57,10 @@ export function createApp(clients, log = logger, store = createEventStore()) {
     const status = Number.isInteger(err.statusCode) ? err.statusCode : 500;
     res.status(status).json({ error: status === 502 ? 'upstream simulation failed' : 'internal server error' });
   });
+
+  app.use(notFoundHandler);
+
+  app.use(createErrorHandler(log));
 
   return app;
 }
